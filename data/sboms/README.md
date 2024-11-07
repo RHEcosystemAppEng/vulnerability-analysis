@@ -1,0 +1,59 @@
+<!--
+SPDX-FileCopyrightText: Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+SPDX-License-Identifier: Apache-2.0
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+-->
+
+
+This directory contains the SBOMs for the containers used in the LLM example. To generate an SBOM for a container, you can use [syft](https://github.com/anchore/syft).
+
+To install syft, you can use the following command:
+
+```bash
+mamba install -c conda-forge syft
+```
+
+The following steps show how to generate an SBOM for the Morpheus container.
+
+```bash
+# Save the Morpheus repo directory
+export MORPHEUS_ROOT=$(git rev-parse --show-toplevel)
+
+# Change directory to the SBOMs directory
+cd ${MORPHEUS_ROOT}/data/sboms
+
+# Disable colors for syft
+export NO_COLORS=y
+
+# Specify which container to generate an SBOM for
+export CONTAINER="nvcr.io/nvidia/morpheus/morpheus:v24.03.02-runtime"
+
+# Generate SBOM
+syft scan ${CONTAINER} -o syft-table=${CONTAINER}.sbom
+```
+
+To generate an SBOM for a list of containers, you can use the following script:
+
+```bash
+# Specify which containers to generate SBOMs for
+export CONTAINERS=(
+    "nvcr.io/nvidia/morpheus/morpheus:24.03-runtime"
+    "nvcr.io/nvidia/morpheus/morpheus:23.11-runtime"
+)
+
+# Generate SBOMs
+for CONTAINER in "${CONTAINERS[@]}"; do
+    syft scan ${CONTAINER} -o syft-table=${CONTAINER}.sbom
+done
+```

@@ -1,0 +1,74 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+import json
+import logging
+import os
+
+from morpheus.config import Config
+from morpheus.pipeline.linear_pipeline import LinearPipeline
+from morpheus.pipeline.stage_decorator import stage
+
+from ..data_models.config import RunConfig
+from ..data_models.output import AgentMorpheusOutput
+from ..data_models.plugin import OutputPluginSchema
+from ..stages.write_pydantic_to_file import WriteFileMode
+from ..stages.write_pydantic_to_file import WritePydanticToFile
+from ..utils.output_formatter import generate_vulnerability_reports
+
+logger = logging.getLogger(__name__)
+
+
+def build_output(pipe: LinearPipeline, config: Config, run_config: RunConfig):
+
+    if (run_config.output.type == "print"):
+
+        @stage
+        def print_output_stage(message: AgentMorpheusOutput) -> AgentMorpheusOutput:
+            logger.info("Got output message for image: %s", message.input.image.name)
+
+            pod_output = [x.model_dump(mode="json") for x in message.output]
+
+            logger.info(json.dumps(pod_output, indent=2))
+
+            return message
+
+        pipe.add_stage(print_output_stage(config))
+
+    elif (run_config.output.type == "file"):
+
+        pipe.add_stage(
+            WritePydanticToFile(
+                config,
+                filename=run_config.output.file_path,
+                mode=(WriteFileMode.OVERWRITE if run_config.output.overwrite else WriteFileMode.CREATE)))
+
+        if run_config.output.markdown_dir is not None:
+            os.makedirs(os.path.realpath(run_config.output.markdown_dir), exist_ok=True)
+
+            @stage
+            def write_output_to_markdown(message: AgentMorpheusOutput) -> AgentMorpheusOutput:
+                generate_vulnerability_reports(message, run_config.output.markdown_dir)
+                return message
+
+            pipe.add_stage(write_output_to_markdown(config))
+
+    elif (run_config.output.type == "plugin"):
+        plugin = OutputPluginSchema.locate(run_config.output.plugin_name)
+        plugin.build_output(pipe, config, run_config)
+    else:
+        # TODO: re-enable other output types. Issue: #100
+        raise NotImplementedError(f'Unsupported output type "{run_config.output.type}", use type "file" instead.')

@@ -1,0 +1,191 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+import asyncio
+import logging
+import os
+from contextlib import asynccontextmanager
+
+import aiohttp
+
+from ..data_models.cve_intel import CveIntel
+from ..data_models.cve_intel import CveIntelEpss
+from ..data_models.cve_intel import CveIntelNvd
+from ..data_models.cve_intel import CveIntelRhsa
+from ..data_models.cve_intel import CveIntelUbuntu
+from .clients.first_client import FirstClient
+from .clients.ghsa_client import GHSAClient
+from .clients.nvd_client import NVDClient
+from .clients.rhsa_client import RHSAClient
+from .clients.ubuntu_client import UbuntuClient
+
+logger = logging.getLogger(f"morpheus.{__name__}")
+
+
+class IntelRetriever:
+    """
+    A class that retrieves details about CVEs (Common Vulnerabilities and Exposures) from NIST and CVE Details websites.
+    """
+
+    def __init__(self,
+                 session: aiohttp.ClientSession,
+                 nist_api_key: str | None = None,
+                 ghsa_api_key: str | None = None,
+                 lang_code: str = 'en',
+                 max_retries: int = 10):
+        """
+        Initialize the NISTCVERetriever with URL templates for vulnerability and CVE details.
+        """
+
+        # Create a shared session object for all requests
+        self._session = session
+
+        self._nvd_client = NVDClient(api_key=os.environ.get('NVD_API_KEY', nist_api_key),
+                                     session=self._session,
+                                     lang_code=lang_code,
+                                     retry_count=max_retries)
+        self._first_client = FirstClient(session=self._session, retry_count=max_retries)
+        self._ghsa_client = GHSAClient(api_key=os.environ.get('GHSA_API_KEY', ghsa_api_key),
+                                       session=self._session,
+                                       retry_count=max_retries)
+        self._rhsa_client = RHSAClient(session=self._session, retry_count=max_retries)
+        self._ubuntu_client = UbuntuClient(session=self._session, retry_count=max_retries)
+
+    @asynccontextmanager
+    async def _get_session(self, session: aiohttp.ClientSession | None = None):
+
+        if (session is not None):
+            yield session
+        elif (self._session is not None):
+            yield self._session
+        else:
+            async with aiohttp.ClientSession() as session:
+                yield session
+
+    async def _get_ghsa_intel(self, vuln_id: str) -> CveIntel:
+        """
+        Gets the GHSA intel and returns an intel object. Must be called first!!!!
+        """
+
+        intel = CveIntel(vuln_id=vuln_id)
+
+        try:
+            intel.ghsa = await self._ghsa_client.get_intel(vuln_id=intel.vuln_id)
+
+        except Exception as e:
+            logger.error("Error fetching GitHub security advisory for %s : %s", vuln_id, e)
+
+        return intel
+
+    async def _get_nvd_intel(self, intel: CveIntel) -> CveIntelNvd | None:
+
+        if (not intel.has_cve_id()):
+            logger.warning("Skipping NVD retrieval since '%s' does not have an associated CVE ID", intel.vuln_id)
+            return None
+
+        try:
+            intel.nvd = await self._nvd_client.get_intel(cve_id=intel.cve_id)
+
+            return intel.nvd
+
+        except Exception as e:
+            logger.error("Error fetching NVD intel for %s : %s", intel.vuln_id, e)
+
+            return None
+
+    async def _get_ubuntu_intel(self, intel: CveIntel) -> CveIntelUbuntu | None:
+
+        if (not intel.has_cve_id()):
+            logger.warning("Skipping Ubuntu retrieval since '%s' does not have an associated CVE ID", intel.vuln_id)
+            return None
+
+        try:
+            intel.ubuntu = await self._ubuntu_client.get_intel(cve_id=intel.cve_id)
+
+            return intel.ubuntu
+
+        except Exception as e:
+            logger.error("Error fetching Ubuntu security advisory for %s : %s", intel.vuln_id, e)
+
+            return None
+
+    async def _get_rhsa_intel(self, intel: CveIntel) -> CveIntelRhsa | None:
+
+        if (not intel.has_cve_id()):
+            logger.warning("Skipping RHSA retrieval since '%s' does not have an associated CVE ID", intel.vuln_id)
+            return None
+
+        try:
+            intel.rhsa = await self._rhsa_client.get_intel(cve_id=intel.cve_id)
+
+            return intel.rhsa
+
+        except Exception as e:
+            logger.error("Error fetching Red Hat security advisory for %s : %s", intel.vuln_id, e)
+
+            return None
+
+    async def _get_epss_score(self, intel: CveIntel) -> CveIntelEpss | None:
+
+        if (not intel.has_cve_id()):
+            logger.warning("Skipping EPSS Score retrieval since '%s' does not have an associated CVE ID", intel.vuln_id)
+            return None
+
+        try:
+            intel.epss = await self._first_client.get_intel(cve_id=intel.cve_id)
+
+            return intel.epss
+        except Exception as e:
+            logger.error("Error fetching EPSS score for %s : %s", intel.vuln_id, e)
+
+            return None
+
+    async def retrieve(self, vuln_id: str) -> CveIntel:
+        """
+        Asynchronously retrieve all relevant details for a given CVE ID.
+
+        Parameters
+        ----------
+        vuln_id : str
+            The CVE identifier. Can be GHSA or NVD
+
+        Returns
+        -------
+        dict
+            A dictionary containing all the retrieved CVE details.
+        """
+
+        # Build the intel objects. Must start with GHSA to get the cve_id
+        intel = await self._get_ghsa_intel(vuln_id=vuln_id)
+
+        if (not intel.has_cve_id()):
+            logger.warning(
+                "Skipping additional intel retrieval beyond GHSA since '%s' "
+                "does not have an associated CVE ID",
+                vuln_id)
+            return intel
+
+        # Run all the coroutines concurrently
+        coros = [
+            self._get_nvd_intel(intel=intel),
+            self._get_ubuntu_intel(intel=intel),
+            self._get_rhsa_intel(intel=intel),
+            self._get_epss_score(intel=intel)
+        ]
+
+        await asyncio.gather(*coros)
+
+        return intel

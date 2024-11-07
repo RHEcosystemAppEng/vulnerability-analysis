@@ -1,0 +1,239 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+import logging
+
+from langchain.agents import AgentType
+from langchain.agents import Tool
+from langchain.agents import initialize_agent
+from langchain.chains.retrieval_qa.base import RetrievalQA
+from langchain.vectorstores.faiss import FAISS
+from langchain_core.embeddings import Embeddings
+
+from morpheus_llm.llm import LLMContext
+from morpheus_llm.llm import LLMEngine
+from morpheus_llm.llm.nodes.extracter_node import ManualExtracterNode
+from morpheus_llm.llm.services.llm_service import LLMService
+from morpheus_llm.llm.services.utils.langchain_llm_client_wrapper import LangchainLLMClientWrapper
+from morpheus_llm.llm.task_handlers.simple_task_handler import SimpleTaskHandler
+
+from ..data_models.config import RunConfig
+from ..data_models.info import AgentMorpheusInfo
+from ..nodes.cve_checklist_node import CVEChecklistNode
+from ..nodes.cve_justification_node import CVEJustifyNode
+from ..nodes.cve_langchain_agent_node import CVELangChainAgentNode
+from ..nodes.cve_summary_node import CVESummaryNode
+from ..utils.code_searcher import LangchainCodeSearcher
+from ..utils.document_embedding import DocumentEmbedding
+from ..utils.prompting import agent_examples_for_prompt
+from ..utils.serp_api_wrapper import MorpheusSerpAPIWrapper
+
+logger = logging.getLogger(__name__)
+
+
+def _build_dynamic_agent_fn(run_config: RunConfig, embeddings: Embeddings):
+
+    chat_service = LLMService.create(run_config.engine.agent.model.service.type,
+                                     **run_config.engine.agent.model.service.model_dump(exclude={"type"},
+                                                                                        by_alias=True))
+    chat_client = chat_service.get_client(**run_config.engine.agent.model.model_dump(exclude={"service", "type"},
+                                                                                     by_alias=True))
+    langchain_llm = LangchainLLMClientWrapper(client=chat_client)
+
+    # Initialize a SerpAPIWrapper object to perform internet searches.
+    search = MorpheusSerpAPIWrapper(max_retries=run_config.general.max_retries)
+
+    # Append new Tools to the tools list, which allows for internet searches and software version comparisons.
+    # The first tool can be especially useful for answering questions about external libraries while the second
+    # allows for more consistent and accurate comparisons of software versions.
+
+    def inner_create_agent_fn(context: LLMContext):
+
+        tools: list[Tool] = [
+            Tool(
+                name="Internet Search",
+                func=search.run,  # Synchronous function for running searches.
+                coroutine=search.arun,  # Asynchronous coroutine for running searches.
+                description="useful for when you need to answer questions about external libraries",
+            ),
+        ]
+
+        vdb_map: AgentMorpheusInfo.VdbPaths = context.message().get_metadata("info.vdb")  # type: ignore
+
+        def run_retrieval_qa_tool(retrieval_qa_tool: RetrievalQA, query: str) -> str | dict:
+            """
+            Runs a given retrieval QA tool on the provided query. Returns a dict of the result string and source
+            documents if the `return_source_documents` config is true, otherwise it returns just the result string if
+            `return_source_documents` is false.
+            """
+            output_dict = retrieval_qa_tool(query)
+
+            # If returning source documents, include the result and source_documents keys in the output
+            if run_config.engine.agent.return_source_documents:
+                return {k: v for k, v in output_dict.items() if k in ["result", "source_documents"]}
+
+            # If not returning source documents, return only the result as a string
+            else:
+                return output_dict["result"]
+
+        if (vdb_map.code_vdb_path is not None):
+            # load code vector DB
+            code_vector_db = FAISS.load_local(vdb_map.code_vdb_path, embeddings, allow_dangerous_deserialization=True)
+            code_qa_tool = RetrievalQA.from_chain_type(
+                llm=langchain_llm,
+                chain_type="stuff",
+                retriever=code_vector_db.as_retriever(),
+                return_source_documents=run_config.engine.agent.return_source_documents)
+            tools.append(
+                Tool(name="Docker Container Code QA System",
+                     func=lambda query: run_retrieval_qa_tool(code_qa_tool, query),
+                     description=("useful for when you need to check if an application or any dependency within "
+                                  "the Docker container uses a function or a component of a library.")))
+        elif run_config.general.code_search_tool:
+
+            logger.info("Preparing source code documents for the code search tool.")
+
+            # Use existing document loader and chunker from DocumentEmbedding class, without embedding.
+            embedder = DocumentEmbedding(embedding=None,
+                                         vdb_directory=run_config.general.base_vdb_dir,
+                                         git_directory=run_config.general.base_git_dir)
+
+            documents = []
+            sources = context.message().get_metadata("input").image.source_info
+            for source_info in sources:
+                if source_info.type == 'code':
+                    documents.extend(embedder.collect_documents(source_info))
+
+            if len(documents) > 0:
+                documents_index = embedder._chunk_documents(documents)
+                lexical_code_searcher = LangchainCodeSearcher(documents_index, rank_documents=True, k=5)
+
+                tools.append(
+                    Tool(name="Docker Container Code Search",
+                         func=lexical_code_searcher.search,
+                         description=("useful for when you need to search the Docker container's code for a given "
+                                      "function or component of a library. This requires exact function name or library"
+                                      "without no additional information")))
+            else:
+                logger.warning("No code documents found for the code search tool.")
+
+        if (vdb_map.doc_vdb_path is not None):
+            guide_vector_db = FAISS.load_local(vdb_map.doc_vdb_path, embeddings, allow_dangerous_deserialization=True)
+            guide_qa_tool = RetrievalQA.from_chain_type(
+                llm=langchain_llm,
+                chain_type="stuff",
+                retriever=guide_vector_db.as_retriever(),
+                return_source_documents=run_config.engine.agent.return_source_documents)
+            tools.append(
+                Tool(name="Docker Container Developer Guide QA System",
+                     func=lambda query: run_retrieval_qa_tool(guide_qa_tool, query),
+                     description=(
+                         "Useful for when you need to ask questions about the purpose and functionality of the Docker "
+                         "container.")))
+
+        # Define a system prompt that sets the context for the language model's task. This prompt positions the assistant
+        # as a powerful entity capable of investigating CVE impacts on Docker containers.
+        sys_prompt = (
+            "You are a very powerful assistant who helps investigate the impact of reported Common Vulnerabilities and "
+            "Exposures (CVE) on Docker containers. Information about the Docker container under investigation is stored in "
+            "vector databases available to you via tools.")
+
+        # Initialize an agent with the tools and settings defined above.
+        # This agent is designed to handle zero-shot reaction descriptions and parse errors.
+        agent = initialize_agent(
+            tools,
+            langchain_llm,
+            agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
+            verbose=run_config.engine.agent.verbose,
+            handle_parsing_errors="Check your output and make sure it conforms, use the Action/Action Input syntax",
+            max_iterations=10,
+            early_stopping_method="generate",
+            return_intermediate_steps=run_config.engine.agent.return_intermediate_steps)
+
+        # Modify the language model chain's prompt template to adjust how the model should process inputs and structure
+        # responses.
+        prompt_template = agent.agent.llm_chain.prompt.template.replace(
+            "Answer the following questions as best you can.",
+            ("If the input is not a question, formulate it into a question first. Include intermediate thought in the "
+             "final answer."),
+            1).replace(
+                "Use the following format:",
+                "Use the following format (start each response with one of the following prefixes: "
+                "[Question, Thought, Action, Action Input, Final Answer]):",
+                1)
+        if run_config.engine.agent.prompt_examples:
+            prompt_template = prompt_template.replace("Begin!\n\n", agent_examples_for_prompt + "Begin!\n\n")
+        agent.agent.llm_chain.prompt.template = f'{sys_prompt} {prompt_template}'
+
+        return agent
+
+    return inner_create_agent_fn
+
+
+def build_engine(*, run_config: RunConfig, embeddings: Embeddings):
+
+    summary_service = LLMService.create(run_config.engine.summary_model.service.type,
+                                        **run_config.engine.summary_model.service.model_dump(exclude={"type"}))
+    justification_service = LLMService.create(
+        run_config.engine.justification_model.service.type,
+        **run_config.engine.justification_model.service.model_dump(exclude={"type"}))
+
+    engine = LLMEngine()
+
+    checklist_node = CVEChecklistNode(checklist_model_config=run_config.engine.checklist_model,
+                                      enable_llm_list_parsing=run_config.general.enable_llm_list_parsing)
+
+    engine.add_node("extract_prompt", node=ManualExtracterNode(input_names=checklist_node.get_input_names()))
+
+    engine.add_node("checklist", inputs=[("/extract_prompt/*", "*")], node=checklist_node)
+
+    engine.add_node("agent",
+                    inputs=[("/checklist", "input")],
+                    node=CVELangChainAgentNode(
+                        create_agent_executor_fn=_build_dynamic_agent_fn(run_config, embeddings),
+                        replace_exceptions=True,
+                        replace_exceptions_value="I do not have a definitive answer for this checklist item."))
+
+    engine.add_node('summary',
+                    inputs=[("/checklist", "checklist_inputs"), ("/agent/outputs", "checklist_outputs"),
+                            "/agent/intermediate_steps"],
+                    node=CVESummaryNode(llm_client=summary_service.get_client(
+                        **run_config.engine.summary_model.model_dump(exclude={"service", "type"}))))
+
+    engine.add_node('justification',
+                    inputs=[("/summary/summary", "summaries")],
+                    node=CVEJustifyNode(llm_client=justification_service.get_client(
+                        **run_config.engine.justification_model.model_dump(exclude={"service", "type"}))))
+
+    handler_inputs = [
+        "/summary/checklist",
+        "/summary/summary",
+        f"/justification/{CVEJustifyNode.JUSTIFICATION_LABEL_COL_NAME}",
+        f"/justification/{CVEJustifyNode.JUSTIFICATION_REASON_COL_NAME}",
+        f"/justification/{CVEJustifyNode.AFFECTED_STATUS_COL_NAME}",
+    ]
+    handler_outputs = [
+        "checklist",
+        "summary",
+        CVEJustifyNode.JUSTIFICATION_LABEL_COL_NAME,
+        CVEJustifyNode.JUSTIFICATION_REASON_COL_NAME,
+        CVEJustifyNode.AFFECTED_STATUS_COL_NAME
+    ]
+
+    # Add our task handler
+    engine.add_task_handler(inputs=handler_inputs, handler=SimpleTaskHandler(output_columns=handler_outputs))
+
+    return engine

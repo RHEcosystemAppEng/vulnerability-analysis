@@ -1,0 +1,142 @@
+{
+  "$schema": "./schemas/config.schema.json",
+  "engine": {
+    "agent": {
+      "model": {
+        "model_name": "meta/llama3-70b-instruct",
+        "service": {
+          "_type": "nvfoundation"
+        },
+        "max_tokens": 2000,
+        "temperature": 0,
+        "top_p": 0.01,
+        "seed": 42
+      },
+      "verbose": false,
+      "return_intermediate_steps": false,
+      "return_source_documents": false
+    },
+    "checklist_model": {
+      "service": {
+        "_type": "nvfoundation"
+      },
+      "model_name": "meta/llama3-70b-instruct",
+      "max_tokens": 2000,
+      "temperature": 0,
+      "top_p": 0.01,
+      "seed": 42
+    },
+    "justification_model": {
+      "model_name": "meta/llama3-70b-instruct",
+      "service": {
+        "_type": "nvfoundation"
+      },
+      "max_tokens": 1024,
+      "temperature": 0,
+      "top_p": 0.01,
+      "seed": 42
+    },
+    "rag_embedding": {
+      "_type": "nim",
+      "model": "nvidia/nv-embedqa-e5-v5",
+      "truncate": "END",
+      "max_batch_size": 128
+    },
+    "summary_model": {
+      "model_name": "meta/llama3-70b-instruct",
+      "service": {
+        "_type": "nvfoundation"
+      },
+      "max_tokens": 1024,
+      "temperature": 0,
+      "top_p": 0.01,
+      "seed": 42
+    }
+  },
+  "general": {
+    "cache_dir": null,
+    "base_vdb_dir": ".cache/am_cache/vdb",
+    "base_git_dir": ".cache/am_cache/git",
+    "max_retries": 5,
+    "model_max_batch_size": 64,
+    "pipeline_batch_size": 1024,
+    "use_uvloop": true,
+    "code_search_tool": false
+  },
+  "input": {
+    "_type": "manual",
+    "message": {
+      "image": {
+        "name": "nvcr.io/nvidia/morpheus/morpheus",
+        "tag": "23.11-runtime",
+        "source_info": [
+          {
+            "type": "code",
+            "git_repo": "https://github.com/nv-morpheus/Morpheus.git",
+            "tag": "v23.11.01",
+            "include": [
+              "**/*.cpp",
+              "**/*.cu",
+              "**/*.cuh",
+              "**/*.h",
+              "**/*.hpp",
+              "**/*.ipynb",
+              "**/*.py",
+              "**/*Dockerfile"
+            ],
+            "exclude": [
+              "tests/**/*"
+            ]
+          },
+          {
+            "type": "doc",
+            "git_repo": "https://github.com/nv-morpheus/Morpheus.git",
+            "tag": "v23.11.01",
+            "include": [
+              "**/*.md",
+              "docs/**/*.rst"
+            ]
+          }
+        ],
+        "sbom_info": {
+          "_type": "file",
+          "file_path": "data/sboms/nvcr.io/nvidia/morpheus/morpheus:v23.11.01-runtime.sbom"
+        }
+      },
+      "scan": {
+        "vulns": [
+          {
+            "vuln_id": "GHSA-3f63-hfp8-52jq"
+          },
+          {
+            "vuln_id": "CVE-2023-50782"
+          },
+          {
+            "vuln_id": "CVE-2023-36632"
+          },
+          {
+            "vuln_id": "CVE-2023-43804"
+          },
+          {
+            "vuln_id": "GHSA-cxfr-5q3r-2rc2"
+          },
+          {
+            "vuln_id": "GHSA-554w-xh4j-8w64"
+          },
+          {
+            "vuln_id": "GHSA-3ww4-gg4f-jr7f" // Same as CVE-2023-50782
+          },
+          {
+            "vuln_id": "CVE-2023-31147" // No vulnerable dependencies for this CVE
+          }
+        ]
+      }
+    }
+  },
+  "output": {
+    "_type": "file",
+    "file_path": ".tmp/output.json",
+    "markdown_dir": ".tmp/vulnerability_markdown_reports",
+    "overwrite": true
+  }
+}

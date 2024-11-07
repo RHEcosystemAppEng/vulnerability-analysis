@@ -1,0 +1,221 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+import typing
+
+from pydantic import BaseModel
+from pydantic import ConfigDict
+from pydantic import Field
+
+
+class CveIntelGhsa(BaseModel):
+    """
+    Information about a GHSA (GitHub Security Advisory) entry.
+    """
+    model_config = ConfigDict(extra="allow")
+
+    class CVSS(BaseModel):
+        score: float | None = None
+        vector_string: str | None = None
+
+    class CWE(BaseModel):
+        cwe_id: str
+        name: str | None = None
+
+    ghsa_id: str
+    cve_id: str | None = None
+    summary: str | None = None
+    description: str | None = None
+    severity: str | None = None
+    vulnerabilities: list | None = None
+    cvss: CVSS | None = None
+    cwes: list[CWE] | None = None
+
+
+class CveIntelNvd(BaseModel):
+    """
+    Information about an NVD (National Vulnerability Database) entry.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    class Configuration(BaseModel):
+        package: str
+        system: str | None = None
+        versionStartExcluding: str | None = None
+        versionEndExcluding: str | None = None
+        versionStartIncluding: str | None = None
+        versionEndIncluding: str | None = None
+
+    cve_id: str
+    cve_description: str | None = None
+    cvss_vector: str | None = None
+    cwe_name: str | None = None
+    cwe_description: str | None = None
+    cwe_extended_description: str | None = None
+    configurations: list[Configuration] | None = None
+    vendor_names: list[str] | None = None
+
+
+class CveIntelRhsa(BaseModel):
+    """
+    Information about a RHSA (Red Hat Security Advisory) entry.
+    """
+    model_config = ConfigDict(extra="allow")
+
+    class Bugzilla(BaseModel):
+        description: str | None = None
+        id: str | None = None
+        url: str | None = None
+
+    class PackageState(BaseModel):
+        product_name: str | None = None
+        fix_state: str | None = None
+        package_name: str | None = None
+        cpe: str | None = None
+
+    bugzilla: typing.Annotated[Bugzilla, Field(default_factory=Bugzilla)]
+    details: list[str] | None = None
+    statement: str | None = None
+    package_state: list[PackageState] | None = None
+    upstream_fix: str | None = None
+
+
+class CveIntelUbuntu(BaseModel):
+    """
+    Information about a Ubuntu CVE entry.
+    """
+    model_config = ConfigDict(extra="allow")
+
+    class Note(BaseModel):
+        author: str | None = None
+        note: str | None = None
+
+    description: str | None = None
+    notes: list[Note] | None = None
+    priority: str | None = None
+    ubuntu_description: str | None = None
+
+
+class CveIntelEpss(BaseModel):
+    """
+    Information about an EPSS (Elastic Product Security Service) entry.
+    """
+    model_config = ConfigDict(extra="allow")
+
+    epss: float | None = None
+    percentile: float | None = None
+    date: str | None = None
+
+
+class CveIntel(BaseModel):
+    """
+    Information about a CVE (Common Vulnerabilities and Exposures) entry.
+    """
+
+    vuln_id: str
+    """
+    The input indentifier. Can be either GHSA or CVE
+    """
+
+    ghsa: CveIntelGhsa | None = None
+    nvd: CveIntelNvd | None = None
+    rhsa: CveIntelRhsa | None = None
+    ubuntu: CveIntelUbuntu | None = None
+    epss: CveIntelEpss | None = None
+
+    @property
+    def cve_id(self):
+        """
+        The CVE identifier.
+
+        Returns
+        -------
+        str
+            The CVE identifier.
+
+        Raises
+        ------
+        ValueError
+            If the CVE ID is not found. An exception will be raised
+        """
+        cve_id = self.get_cve_id()
+
+        if (cve_id is not None):
+            return cve_id
+
+        raise ValueError("CVE ID not found")
+
+    @property
+    def ghsa_id(self):
+        """
+        The GHSA identifier.
+        """
+        ghsa_id = self.get_ghsa_id()
+
+        if (ghsa_id is not None):
+            return ghsa_id
+
+        raise ValueError("GHSA ID not found")
+
+    def has_cve_id(self):
+        """
+        Check if the object has a CVE ID.
+        """
+        return self.get_cve_id() is not None
+
+    def has_ghsa_id(self):
+        """
+        Check if the object has a GHSA ID.
+        """
+        return self.get_ghsa_id() is not None
+
+    def get_cve_id(self):
+        """
+        Get the CVE ID.
+
+        Returns
+        -------
+        str | None
+            The CVE ID or None if not found.
+        """
+        if (self.nvd is not None):
+            return self.nvd.cve_id
+
+        if (self.ghsa is not None and self.ghsa.cve_id is not None):
+            return self.ghsa.cve_id
+
+        if (self.vuln_id.startswith("CVE-")):
+            return self.vuln_id
+
+        return None
+
+    def get_ghsa_id(self):
+        """
+        Get the GHSA ID.
+
+        Returns
+        -------
+        str | None
+            The GHSA ID or None if not found.
+        """
+        if (self.ghsa is not None):
+            return self.ghsa.ghsa_id
+
+        if (self.vuln_id.startswith("GHSA-")):
+            return self.vuln_id
+
+        return None

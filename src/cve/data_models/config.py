@@ -1,0 +1,313 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+import os
+import tempfile
+import typing
+
+from pydantic import BaseModel
+from pydantic import ConfigDict
+from pydantic import Discriminator
+from pydantic import Field
+from pydantic import FilePath
+from pydantic import NonNegativeInt
+from pydantic import PositiveInt
+from pydantic import Tag
+from pydantic import field_validator
+
+from morpheus.utils.http_utils import HTTPMethod
+
+from .common import TypedBaseModel
+from .input import AgentMorpheusInput
+
+
+def _llm_discriminator(v: typing.Any) -> str | None:
+
+    if isinstance(v, dict):
+        return v.get("service").get("_type")
+    return getattr(getattr(v, "service"), "_type")
+
+
+class GeneralConfig(BaseModel):
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    base_vdb_dir: str = os.path.join(tempfile.gettempdir(), "am_cache", "vdb")
+    base_git_dir: str = os.path.join(tempfile.gettempdir(), "am_cache", "git")
+    enable_llm_list_parsing: bool = False
+    cache_dir: str | None = None
+    ignore_build_vdb_errors: bool = False
+    max_retries: NonNegativeInt = 10
+    model_max_batch_size: PositiveInt = 64
+    num_threads: PositiveInt = Field(default_factory=os.cpu_count)
+    pipeline_batch_size: PositiveInt = 1024
+    use_uvloop: bool = True
+    """
+    Whether to use uvloop for the event loop. This can provide a significant speedup in some cases. Disable to provide
+    better error messages when debugging.
+    """
+
+    code_search_tool: bool = False
+
+    @field_validator("num_threads")
+    @classmethod
+    def get_num_threads(cls, v: int) -> int:
+        if v is None or v < 1:
+            return os.cpu_count() or 1
+        else:
+            return v
+
+
+########################### LLM Model Configs ###########################
+class NeMoLLMServiceConfig(TypedBaseModel[typing.Literal["nemo"]]):
+
+    api_key: str | None = None
+    org_id: str | None = None
+    retry_count: NonNegativeInt = 5
+
+
+class NeMoLLMModelConfig(BaseModel):
+
+    service: NeMoLLMServiceConfig
+
+    model_name: str
+    customization_id: str | None = None
+    temperature: typing.Annotated[float, Field(ge=0.0, le=1.0)] = 0.0
+    top_k: NonNegativeInt = 0
+    top_p: float = 1
+    random_seed: int | None = None
+    tokens_to_generate: int = 300
+    beam_search_diversity_rate: float = 0.0
+    beam_width: int = 1
+    repetition_penalty: float = 1.0
+    length_penalty: float = 1.0
+    logprobs: bool = True
+
+    model_config = ConfigDict(protected_namespaces=())
+
+
+class NVFoundationLLMServiceConfig(TypedBaseModel[typing.Literal["nvfoundation"]]):
+
+    api_key: str | None = None
+    base_url: str | None = None
+
+
+class NVFoundationLLMModelConfig(TypedBaseModel[typing.Literal["nvfoundation"]]):
+
+    service: NVFoundationLLMServiceConfig
+
+    model_name: str
+    temperature: float = 0.0
+    top_p: float | None = None
+    max_tokens: PositiveInt = 300
+    seed: int | None = None
+
+    model_config = ConfigDict(protected_namespaces=())
+
+
+class OpenAIServiceConfig(TypedBaseModel[typing.Literal["openai"]]):
+
+    api_key: str | None = None
+    base_url: str | None = None
+
+
+class OpenAIModelConfig(BaseModel):
+
+    service: OpenAIServiceConfig
+
+    model_name: str
+    temperature: float = 0.0
+    top_p: float = 1.0
+    seed: int | None = None
+    max_retries: int = 10
+    json_output: bool = Field(False, alias='json')
+
+    model_config = ConfigDict(protected_namespaces=(), populate_by_name=True)
+
+
+LLMModelConfig = typing.Annotated[typing.Annotated[NeMoLLMModelConfig, Tag("nemo")]
+                                  | typing.Annotated[OpenAIModelConfig, Tag("openai")]
+                                  | typing.Annotated[NVFoundationLLMModelConfig, Tag("nvfoundation")],
+                                  Discriminator(_llm_discriminator)]
+
+
+########################### Input Configs ###########################
+class ManualInputConfig(TypedBaseModel[typing.Literal["manual"]]):
+
+    message: AgentMorpheusInput
+
+    repeat_count: int = 1
+
+
+class FileInputConfig(TypedBaseModel[typing.Literal["file"]]):
+
+    file: str
+
+    repeat_count: int = 1
+
+
+class HttpInputConfig(TypedBaseModel[typing.Literal["http"]]):
+
+    address: str = "127.0.0.1"
+
+    endpoint: str = "/scan"
+
+    port: int = 8080
+
+    http_method: HTTPMethod = HTTPMethod.POST
+
+    stop_after: int = 0
+
+
+class PluginInputConfig(TypedBaseModel[typing.Literal["plugin"]]):
+
+    plugin_name: str
+
+    plugin_config: dict[str, typing.Any] = {}
+
+
+InputConfig = typing.Annotated[typing.Annotated[ManualInputConfig, Tag(ManualInputConfig.static_type())]
+                               | typing.Annotated[FileInputConfig, Tag(FileInputConfig.static_type())]
+                               | typing.Annotated[HttpInputConfig, Tag(HttpInputConfig.static_type())]
+                               | typing.Annotated[PluginInputConfig, Tag(PluginInputConfig.static_type())],
+                               Discriminator(TypedBaseModel.discriminator)]
+
+
+class HuggingFaceEmbeddingModelConfig(TypedBaseModel[typing.Literal["huggingface"]]):
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    model_name: str
+    model_kwargs: dict[str, typing.Any] = {}
+    encode_kwargs: dict[str, typing.Any] = {}
+
+
+class OpenAIEmbeddingModelConfig(TypedBaseModel[typing.Literal["openai"]]):
+
+    openai_api_key: str | None = None
+    max_retries: int = 10
+    chunk_size: int = 128
+
+
+class NIMEmbeddingModelConfig(TypedBaseModel[typing.Literal["nim"]]):
+
+    api_key: str | None = None
+    model: str
+    truncate: typing.Literal["NONE", "START", "END"] = "END"
+    max_batch_size: int = 128
+
+
+EmbeddingModelConfig = typing.Annotated[
+    typing.Annotated[HuggingFaceEmbeddingModelConfig, Tag(HuggingFaceEmbeddingModelConfig.static_type())]
+    | typing.Annotated[OpenAIEmbeddingModelConfig, Tag(OpenAIEmbeddingModelConfig.static_type())]
+    | typing.Annotated[NIMEmbeddingModelConfig, Tag(NIMEmbeddingModelConfig.static_type())],
+    Discriminator(TypedBaseModel.discriminator)]
+
+
+class EngineAgentConfig(BaseModel):
+
+    model: LLMModelConfig
+    version_compare_tool: bool = False
+    prompt_examples: bool = False
+    verbose: bool = False
+    return_intermediate_steps: bool = False
+    return_source_documents: bool = False
+
+
+class EngineConfig(BaseModel):
+
+    agent: EngineAgentConfig
+    checklist_model: LLMModelConfig
+    justification_model: LLMModelConfig
+    rag_embedding: EmbeddingModelConfig
+    sbom_faiss_dir: str | None = None
+    summary_model: LLMModelConfig
+
+
+class OutputPrintConfig(TypedBaseModel[typing.Literal["print"]]):
+
+    pass
+
+
+class OutputFileConfig(TypedBaseModel[typing.Literal["file"]]):
+
+    file_path: str | None = "./.tmp/agent_morpheus_output.json"
+
+    markdown_dir: str | None = "./.tmp/vulnerability_markdown_reports"
+
+    overwrite: bool = False
+
+
+class OutputHttpConfig(TypedBaseModel[typing.Literal["http"]]):
+
+    url: str
+
+    endpoint: str
+
+
+class OutputElasticsearchConfig(TypedBaseModel[typing.Literal["elasticsearch"]]):
+
+    url: str
+
+    index: str
+
+    conf_file: FilePath
+
+    raise_on_exception: bool = False
+
+
+class OutputPluginConfig(TypedBaseModel[typing.Literal["plugin"]]):
+
+    plugin_name: str
+
+    plugin_config: dict[str, typing.Any] = {}
+
+
+OutputConfig = typing.Annotated[typing.Annotated[OutputPrintConfig, Tag(OutputPrintConfig.static_type())]
+                                | typing.Annotated[OutputFileConfig, Tag(OutputFileConfig.static_type())]
+                                | typing.Annotated[OutputPluginConfig, Tag(OutputPluginConfig.static_type())],
+                                Discriminator(TypedBaseModel.discriminator)]
+
+
+class RunConfig(BaseModel):
+
+    model_config = ConfigDict(protected_namespaces=())
+
+    # Global Options
+    general: GeneralConfig = GeneralConfig()
+
+    # Input Configuration
+    input: InputConfig
+
+    # Engine Configuration
+    engine: EngineConfig
+
+    # Output Configuration
+    output: OutputConfig
+
+    @staticmethod
+    def generate_json_schema() -> dict[str, typing.Any]:
+        return RunConfig.model_json_schema()
+
+    @staticmethod
+    def write_json_schema(schema_path: str) -> None:
+
+        import json
+
+        schema = RunConfig.generate_json_schema()
+
+        with open(schema_path, "w", encoding="utf-8") as f:
+            json.dump(schema, f, indent=2)

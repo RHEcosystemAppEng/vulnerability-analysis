@@ -1,0 +1,6 @@
+
+# Ignore any secret certificate files
+*.pem
+
+# Ignore the logs directory
+logs/

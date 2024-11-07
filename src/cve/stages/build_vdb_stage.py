@@ -1,0 +1,143 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+import logging
+import typing
+from pathlib import Path
+
+import mrc
+import mrc.core.operators as ops
+
+from morpheus.config import Config
+from morpheus.pipeline.single_port_stage import SinglePortStage
+from morpheus.pipeline.stage_schema import StageSchema
+
+from ..data_models.info import AgentMorpheusInfo
+from ..data_models.input import AgentMorpheusEngineInput
+from ..data_models.input import AgentMorpheusInput
+from ..data_models.input import SourceDocumentsInfo
+
+logger = logging.getLogger(f"morpheus.{__name__}")
+
+
+class BuildSourceCodeVdbStage(SinglePortStage):
+
+    def __init__(self,
+                 c: Config,
+                 build_vdb_fn: typing.Callable[[list[SourceDocumentsInfo]], tuple[Path | None, Path | None]],
+                 ignore_errors: bool = False,
+                 ignore_code_embedding: bool = False):
+        super().__init__(c)
+
+        self._build_vdb_fn = build_vdb_fn
+        self._ignore_errors = ignore_errors
+        self._ignore_code_embedding = ignore_code_embedding
+
+    @property
+    def name(self) -> str:
+        return "build-source-code-vdb-stage"
+
+    def accepted_types(self) -> typing.Tuple:
+        """
+        Accepted input types for this stage are returned.
+
+        Returns
+        -------
+        typing.Tuple
+            Accepted input types.
+
+        """
+        return (AgentMorpheusInput, )
+
+    def compute_schema(self, schema: StageSchema):
+        for (port_idx, port_schema) in enumerate(schema.input_schemas):
+            schema.output_schemas[port_idx].set_type(AgentMorpheusEngineInput)
+
+    def supports_cpp_node(self):
+        return False
+
+    def _build_source_code_vdb_stage(self, message: AgentMorpheusInput) -> AgentMorpheusEngineInput | None:
+        """
+        Stage that builds source code and documentation FAISS databases based upon the source repositories.
+        For now we are only storing a path to the FAISS databases in the message.
+
+        In the future we will want to store the actual FAISS databases in the message.
+
+        Parameters
+        ----------
+        message : MessageMeta
+            The input message
+        build_vdb_fn : typing.Callable[[str, str, list[SourceCodeRepo]], dict[str, str]]
+            The function that builds the VDB database for a given vulnerability scan id, base image, and source code
+            repos
+        ignore_errors : bool
+            When True raised exceptions will be logged, when False raised exceptions will be re-raised
+        """
+
+        vdb_code_path = None
+        vdb_doc_path = None
+
+        try:
+            base_image = message.image.name
+
+            source_code_repos = message.image.source_info
+
+            vdb_code_path, vdb_doc_path = self._build_vdb_fn(source_code_repos, self._ignore_code_embedding)
+
+            if (vdb_code_path is None):
+                # Only log warning if we're not ignoring code embeddings
+                if (not self._ignore_code_embedding):
+                    logger.warning(("Failed to generate code VDB for image '%s'. "
+                                    "Ensure the source repositories are setup correctly"),
+                                   base_image)
+            else:
+                vdb_code_path = str(vdb_code_path)
+
+            if (vdb_doc_path is None):
+                logger.warning(("Failed to generate documentation VDB for image '%s'. "
+                                "Ensure the source repositories are setup correctly"),
+                               base_image)
+            else:
+                vdb_doc_path = str(vdb_doc_path)
+
+        except Exception as e:
+            # For now just skip the row
+            logger.error("Failure to build VDB for image, '%s', with source code info: %s\nError: %s",
+                         base_image,
+                         source_code_repos,
+                         e,
+                         exc_info=True)
+
+            if not self._ignore_errors:
+                raise
+
+            # Return None to skip this message
+            return None
+
+        return AgentMorpheusEngineInput(
+            input=message,
+            info=AgentMorpheusInfo(
+                vdb=AgentMorpheusInfo.VdbPaths(code_vdb_path=vdb_code_path, doc_vdb_path=vdb_doc_path)))
+
+    def _build_single(self, builder: mrc.Builder, input_node: mrc.SegmentObject) -> mrc.SegmentObject:
+
+        node = builder.make_node(self.unique_name,
+                                 ops.map(self._build_source_code_vdb_stage),
+                                 ops.filter(lambda x: x is not None))
+
+        builder.make_edge(input_node, node)
+
+        return node

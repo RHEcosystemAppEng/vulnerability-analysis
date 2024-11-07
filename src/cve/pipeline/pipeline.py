@@ -1,0 +1,227 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+import datetime
+import logging
+import os
+import time
+
+import langchain
+import langchain.globals
+import pandas as pd
+
+import cudf
+
+from morpheus.config import Config
+from morpheus.config import CppConfig
+from morpheus.config import PipelineModes
+from morpheus.messages import ControlMessage
+from morpheus.messages import MessageMeta
+from morpheus.pipeline.linear_pipeline import LinearPipeline
+from morpheus.pipeline.stage_decorator import stage
+from morpheus.stages.general.monitor_stage import MonitorStage
+from morpheus.utils.concat_df import concat_dataframes
+from morpheus_llm.stages.llm.llm_engine_stage import LLMEngineStage
+
+from ..data_models.config import RunConfig
+from ..data_models.input import AgentMorpheusEngineInput
+from ..stages.convert_to_output_object import convert_to_output_object
+from .engine import build_engine
+from .input import build_input
+from .output import build_output
+
+logger = logging.getLogger(__name__)
+
+
+def build_pipeline_without_sink(run_config: RunConfig) -> tuple[Config, LinearPipeline]:
+    """
+    Builds the entire pipeline with the exception of the sink.
+    """
+    if (run_config.general.use_uvloop):
+        # If uvloop is installed, use that instead of asyncio for running the loop. Results in a significantly faster
+        # pipeline
+        try:
+            import uvloop
+
+            uvloop.install()
+        except ImportError:
+            pass
+
+    if (run_config.general.cache_dir is not None):
+        # This import is expensive, do it only if needed
+        from langchain.cache import SQLiteCache
+
+        # Set up the cache to avoid repeated calls
+        os.makedirs(run_config.general.cache_dir, exist_ok=True)
+
+        langchain.globals.set_llm_cache(
+            SQLiteCache(database_path=os.path.join(run_config.general.cache_dir, "langchain.sqlite")))
+
+    CppConfig.set_should_use_cpp(False)
+
+    config = Config()
+    config.mode = PipelineModes.NLP
+
+    # Below properties are specified by the command line
+    config.num_threads = run_config.general.num_threads
+    config.pipeline_batch_size = run_config.general.pipeline_batch_size
+    config.model_max_batch_size = run_config.general.model_max_batch_size
+    config.edge_buffer_size = 128
+
+    pipe = LinearPipeline(config)
+
+    embeddings = build_input(pipe, config, run_config)
+
+    engine = build_engine(run_config=run_config, embeddings=embeddings)
+
+    @stage
+    def convert_input_to_df(message: AgentMorpheusEngineInput) -> ControlMessage:
+
+        assert message.info.intel is not None, "The input message must have intel information"
+
+        input_names = ['vuln_id', 'ghsa_id', 'cve_id']
+
+        # Determine the input columns that need to be set from the engine (based on checklist_prompt fields)
+        input_names.extend([name for name in engine.get_input_names() if name not in input_names])
+
+        # Convert intel object to DataFrame
+        # Using pandas since cudf doesn't support json_normalize()
+        full_df = pd.json_normalize([{
+            "vuln_id": x.vuln_id, "ghsa_id": x.get_ghsa_id(), "cve_id": x.get_cve_id(), **x.model_dump(mode="json")
+        } for x in message.info.intel],
+                                    sep="_")
+
+        # Ensure all columns for the input_names exist in the DataFrame
+        for name in input_names:
+            if name not in full_df.columns:
+                full_df[name] = [None] * len(full_df)
+
+        # Add vulnerable dependencies to DataFrame
+        vulnerable_dependencies = []
+        for v in message.info.vulnerable_dependencies:
+            vulnerable_sbom_packages = v.vulnerable_sbom_packages
+            vulnerable_dependencies.append([p.name for p in vulnerable_sbom_packages])
+
+        has_vuln_package_info_flags = [
+            len(v.vuln_package_intel_sources) > 0 for v in message.info.vulnerable_dependencies
+        ]
+
+        full_df["vulnerable_dependencies"] = vulnerable_dependencies
+
+        # Filter full_df by whether the CVE has vulnerable dependencies or lacks vulnerable package info from intel
+        filtered_df = full_df[[
+            len(vuln_deps) > 0 or not has_vuln_package_info for vuln_deps,
+            has_vuln_package_info in zip(vulnerable_dependencies, has_vuln_package_info_flags)
+        ]]
+
+        # Convert pandas to cudf
+        # NOTE: keep this AFTER the filtering step above to avoid a bug when filtering cudfs with certain dtypes
+        if len(filtered_df) > 0:
+            filtered_df = cudf.from_pandas(filtered_df)
+        # To avoid a bug when converting empty dataframe to cudf, create empty cudf from scratch
+        else:
+            filtered_df = cudf.DataFrame(columns=filtered_df.columns)
+
+        # Drop duplicate vuln_ids
+        if filtered_df.duplicated(subset="vuln_id").any():
+            logger.warning(
+                "Input contains duplicate vuln_ids. Passing only the first instance of each vuln_id to the LLMEngine.")
+            filtered_df = filtered_df.drop_duplicates(subset="vuln_id")
+
+        logger.info("Passing %d vuln_id(s) with vulnerable dependencies to the LLM Engine", len(filtered_df))
+
+        # Convert input columns to MessageMeta
+        mm = MessageMeta(df=filtered_df[input_names])
+
+        cm = ControlMessage()
+
+        cm.payload(mm)
+
+        cm.set_metadata("input", message.input)
+        cm.set_metadata("info.vdb", message.info.vdb)
+        cm.set_metadata("info.intel", message.info.intel)
+        cm.set_metadata("info.sbom", message.info.sbom)
+        cm.set_metadata("info.vulnerable_dependencies", message.info.vulnerable_dependencies)
+
+        completion_task = {
+            "task_type": "completion",
+            "task_dict": {
+                "input_keys": ['code_vdb', 'cves', 'doc_vdb', 's_feed_group', 's_url', 's_vuln'],
+            },
+        }
+
+        cm.add_task(task_type="llm_engine", task=completion_task)
+
+        return cm
+
+    pipe.add_stage(convert_input_to_df(config))
+
+    @stage
+    def add_start_timestamp(message: ControlMessage) -> ControlMessage:
+        message.set_timestamp("start_time", datetime.datetime.now())
+
+        return message
+
+    pipe.add_stage(add_start_timestamp(config=config))
+
+    pipe.add_stage(MonitorStage(config, description="Source"))
+
+    pipe.add_stage(LLMEngineStage(config, engine=engine))
+
+    @stage
+    def add_end_timestamp(message: ControlMessage) -> ControlMessage:
+        current_epoch = datetime.datetime.now()
+
+        message.set_timestamp("end_time", current_epoch)
+
+        start_epoch: datetime.datetime = message.get_timestamp("start_time")
+
+        # Print the message elapsed time in milliseconds
+        logger.info(f"Message elapsed time: {(current_epoch - start_epoch).total_seconds()} sec")
+
+        return message
+
+    pipe.add_stage(add_end_timestamp(config=config))
+
+    pipe.add_stage(MonitorStage(config, description="LLM"))
+
+    pipe.add_stage(convert_to_output_object(config))
+
+    return (config, pipe)
+
+
+def pipeline(run_config: RunConfig):
+
+    (config, pipe) = build_pipeline_without_sink(run_config)
+
+    in_mem_sink = build_output(pipe, config, run_config)
+
+    start_time = time.time()
+
+    pipe.run()
+
+    if in_mem_sink is not None:
+        messages = in_mem_sink.get_messages()
+        responses = concat_dataframes(messages)
+        logger.info("Pipeline complete. Received %s responses", len(responses))
+
+        if logger.isEnabledFor(logging.DEBUG):
+            # The responses are quite long, when debug is enabled disable the truncation that pandas and cudf normally
+            # perform on the output
+            pd.set_option('display.max_colwidth', None)
+            logger.debug("Responses:\n%s", responses)
+
+    return start_time

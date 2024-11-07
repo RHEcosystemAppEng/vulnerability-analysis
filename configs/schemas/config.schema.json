@@ -1,0 +1,1335 @@
+{
+  "$defs": {
+    "AgentMorpheusInput": {
+      "description": "Inputs required by the Agent Morpheus pipeline.",
+      "properties": {
+        "scan": {
+          "$ref": "#/$defs/ScanInfoInput"
+        },
+        "image": {
+          "$ref": "#/$defs/ImageInfoInput"
+        }
+      },
+      "required": [
+        "scan",
+        "image"
+      ],
+      "title": "AgentMorpheusInput",
+      "type": "object"
+    },
+    "EngineAgentConfig": {
+      "properties": {
+        "model": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NeMoLLMModelConfig"
+            },
+            {
+              "$ref": "#/$defs/OpenAIModelConfig"
+            },
+            {
+              "$ref": "#/$defs/NVFoundationLLMModelConfig"
+            }
+          ],
+          "title": "Model"
+        },
+        "version_compare_tool": {
+          "default": false,
+          "title": "Version Compare Tool",
+          "type": "boolean"
+        },
+        "prompt_examples": {
+          "default": false,
+          "title": "Prompt Examples",
+          "type": "boolean"
+        },
+        "verbose": {
+          "default": false,
+          "title": "Verbose",
+          "type": "boolean"
+        },
+        "return_intermediate_steps": {
+          "default": false,
+          "title": "Return Intermediate Steps",
+          "type": "boolean"
+        },
+        "return_source_documents": {
+          "default": false,
+          "title": "Return Source Documents",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "title": "EngineAgentConfig",
+      "type": "object"
+    },
+    "EngineConfig": {
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/EngineAgentConfig"
+        },
+        "checklist_model": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NeMoLLMModelConfig"
+            },
+            {
+              "$ref": "#/$defs/OpenAIModelConfig"
+            },
+            {
+              "$ref": "#/$defs/NVFoundationLLMModelConfig"
+            }
+          ],
+          "title": "Checklist Model"
+        },
+        "justification_model": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NeMoLLMModelConfig"
+            },
+            {
+              "$ref": "#/$defs/OpenAIModelConfig"
+            },
+            {
+              "$ref": "#/$defs/NVFoundationLLMModelConfig"
+            }
+          ],
+          "title": "Justification Model"
+        },
+        "rag_embedding": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/HuggingFaceEmbeddingModelConfig"
+            },
+            {
+              "$ref": "#/$defs/OpenAIEmbeddingModelConfig"
+            },
+            {
+              "$ref": "#/$defs/NIMEmbeddingModelConfig"
+            }
+          ],
+          "title": "Rag Embedding"
+        },
+        "sbom_faiss_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sbom Faiss Dir"
+        },
+        "summary_model": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/NeMoLLMModelConfig"
+            },
+            {
+              "$ref": "#/$defs/OpenAIModelConfig"
+            },
+            {
+              "$ref": "#/$defs/NVFoundationLLMModelConfig"
+            }
+          ],
+          "title": "Summary Model"
+        }
+      },
+      "required": [
+        "agent",
+        "checklist_model",
+        "justification_model",
+        "rag_embedding",
+        "summary_model"
+      ],
+      "title": "EngineConfig",
+      "type": "object"
+    },
+    "FileInputConfig": {
+      "properties": {
+        "_type": {
+          "const": "file",
+          "default": "file",
+          "description": "The type of the object",
+          "title": "Type"
+        },
+        "file": {
+          "title": "File",
+          "type": "string"
+        },
+        "repeat_count": {
+          "default": 1,
+          "title": "Repeat Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "file"
+      ],
+      "title": "FileInputConfig",
+      "type": "object"
+    },
+    "FileSBOMInfoInput": {
+      "description": "A file path pointing to a Software Bill of Materials file.",
+      "properties": {
+        "_type": {
+          "const": "file",
+          "default": "file",
+          "description": "The type of the object",
+          "title": "Type"
+        },
+        "file_path": {
+          "title": "File Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_path"
+      ],
+      "title": "FileSBOMInfoInput",
+      "type": "object"
+    },
+    "GeneralConfig": {
+      "properties": {
+        "base_vdb_dir": {
+          "default": "/tmp/am_cache/vdb",
+          "title": "Base Vdb Dir",
+          "type": "string"
+        },
+        "base_git_dir": {
+          "default": "/tmp/am_cache/git",
+          "title": "Base Git Dir",
+          "type": "string"
+        },
+        "enable_llm_list_parsing": {
+          "default": false,
+          "title": "Enable Llm List Parsing",
+          "type": "boolean"
+        },
+        "cache_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Cache Dir"
+        },
+        "ignore_build_vdb_errors": {
+          "default": false,
+          "title": "Ignore Build Vdb Errors",
+          "type": "boolean"
+        },
+        "max_retries": {
+          "default": 10,
+          "minimum": 0,
+          "title": "Max Retries",
+          "type": "integer"
+        },
+        "model_max_batch_size": {
+          "default": 64,
+          "exclusiveMinimum": 0,
+          "title": "Model Max Batch Size",
+          "type": "integer"
+        },
+        "num_threads": {
+          "exclusiveMinimum": 0,
+          "title": "Num Threads",
+          "type": "integer"
+        },
+        "pipeline_batch_size": {
+          "default": 1024,
+          "exclusiveMinimum": 0,
+          "title": "Pipeline Batch Size",
+          "type": "integer"
+        },
+        "use_uvloop": {
+          "default": true,
+          "title": "Use Uvloop",
+          "type": "boolean"
+        },
+        "code_search_tool": {
+          "default": false,
+          "title": "Code Search Tool",
+          "type": "boolean"
+        }
+      },
+      "title": "GeneralConfig",
+      "type": "object"
+    },
+    "HTTPMethod": {
+      "description": "Not a complete list of HTTP methods, just the ones we use.",
+      "enum": [
+        "GET",
+        "PATCH",
+        "POST",
+        "PUT"
+      ],
+      "title": "HTTPMethod",
+      "type": "string"
+    },
+    "HttpInputConfig": {
+      "properties": {
+        "_type": {
+          "const": "http",
+          "default": "http",
+          "description": "The type of the object",
+          "title": "Type"
+        },
+        "address": {
+          "default": "127.0.0.1",
+          "title": "Address",
+          "type": "string"
+        },
+        "endpoint": {
+          "default": "/scan",
+          "title": "Endpoint",
+          "type": "string"
+        },
+        "port": {
+          "default": 8080,
+          "title": "Port",
+          "type": "integer"
+        },
+        "http_method": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/HTTPMethod"
+            }
+          ],
+          "default": "POST"
+        },
+        "stop_after": {
+          "default": 0,
+          "title": "Stop After",
+          "type": "integer"
+        }
+      },
+      "title": "HttpInputConfig",
+      "type": "object"
+    },
+    "HuggingFaceEmbeddingModelConfig": {
+      "properties": {
+        "_type": {
+          "const": "huggingface",
+          "default": "huggingface",
+          "description": "The type of the object",
+          "title": "Type"
+        },
+        "model_name": {
+          "title": "Model Name",
+          "type": "string"
+        },
+        "model_kwargs": {
+          "default": {},
+          "title": "Model Kwargs",
+          "type": "object"
+        },
+        "encode_kwargs": {
+          "default": {},
+          "title": "Encode Kwargs",
+          "type": "object"
+        }
+      },
+      "required": [
+        "model_name"
+      ],
+      "title": "HuggingFaceEmbeddingModelConfig",
+      "type": "object"
+    },
+    "ImageInfoInput": {
+      "description": "Information about a container image, including the source information and sbom information.",
+      "properties": {
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "tag": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tag"
+        },
+        "digest": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Digest"
+        },
+        "platform": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Platform"
+        },
+        "feed_group": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Feed Group"
+        },
+        "source_info": {
+          "items": {
+            "$ref": "#/$defs/SourceDocumentsInfo"
+          },
+          "title": "Source Info",
+          "type": "array"
+        },
+        "sbom_info": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ManualSBOMInfoInput"
+            },
+            {
+              "$ref": "#/$defs/FileSBOMInfoInput"
+            }
+          ],
+          "title": "Sbom Info"
+        }
+      },
+      "required": [
+        "source_info",
+        "sbom_info"
+      ],
+      "title": "ImageInfoInput",
+      "type": "object"
+    },
+    "ManualInputConfig": {
+      "properties": {
+        "_type": {
+          "const": "manual",
+          "default": "manual",
+          "description": "The type of the object",
+          "title": "Type"
+        },
+        "message": {
+          "$ref": "#/$defs/AgentMorpheusInput"
+        },
+        "repeat_count": {
+          "default": 1,
+          "title": "Repeat Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "message"
+      ],
+      "title": "ManualInputConfig",
+      "type": "object"
+    },
+    "ManualSBOMInfoInput": {
+      "description": "Manually provided Software Bill of Materials, consisting of a list of SBOMPackage objects.",
+      "properties": {
+        "_type": {
+          "const": "manual",
+          "default": "manual",
+          "description": "The type of the object",
+          "title": "Type"
+        },
+        "packages": {
+          "items": {
+            "$ref": "#/$defs/SBOMPackage"
+          },
+          "title": "Packages",
+          "type": "array"
+        }
+      },
+      "required": [
+        "packages"
+      ],
+      "title": "ManualSBOMInfoInput",
+      "type": "object"
+    },
+    "NIMEmbeddingModelConfig": {
+      "properties": {
+        "_type": {
+          "const": "nim",
+          "default": "nim",
+          "description": "The type of the object",
+          "title": "Type"
+        },
+        "api_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Api Key"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "truncate": {
+          "default": "END",
+          "enum": [
+            "NONE",
+            "START",
+            "END"
+          ],
+          "title": "Truncate",
+          "type": "string"
+        },
+        "max_batch_size": {
+          "default": 128,
+          "title": "Max Batch Size",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "model"
+      ],
+      "title": "NIMEmbeddingModelConfig",
+      "type": "object"
+    },
+    "NVFoundationLLMModelConfig": {
+      "properties": {
+        "_type": {
+          "const": "nvfoundation",
+          "default": "nvfoundation",
+          "description": "The type of the object",
+          "title": "Type"
+        },
+        "service": {
+          "$ref": "#/$defs/NVFoundationLLMServiceConfig"
+        },
+        "model_name": {
+          "title": "Model Name",
+          "type": "string"
+        },
+        "temperature": {
+          "default": 0.0,
+          "title": "Temperature",
+          "type": "number"
+        },
+        "top_p": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Top P"
+        },
+        "max_tokens": {
+          "default": 300,
+          "exclusiveMinimum": 0,
+          "title": "Max Tokens",
+          "type": "integer"
+        },
+        "seed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seed"
+        }
+      },
+      "required": [
+        "service",
+        "model_name"
+      ],
+      "title": "NVFoundationLLMModelConfig",
+      "type": "object"
+    },
+    "NVFoundationLLMServiceConfig": {
+      "properties": {
+        "_type": {
+          "const": "nvfoundation",
+          "default": "nvfoundation",
+          "description": "The type of the object",
+          "title": "Type"
+        },
+        "api_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Api Key"
+        },
+        "base_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Base Url"
+        }
+      },
+      "title": "NVFoundationLLMServiceConfig",
+      "type": "object"
+    },
+    "NeMoLLMModelConfig": {
+      "properties": {
+        "service": {
+          "$ref": "#/$defs/NeMoLLMServiceConfig"
+        },
+        "model_name": {
+          "title": "Model Name",
+          "type": "string"
+        },
+        "customization_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Customization Id"
+        },
+        "temperature": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Temperature",
+          "type": "number"
+        },
+        "top_k": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Top K",
+          "type": "integer"
+        },
+        "top_p": {
+          "default": 1,
+          "title": "Top P",
+          "type": "number"
+        },
+        "random_seed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Random Seed"
+        },
+        "tokens_to_generate": {
+          "default": 300,
+          "title": "Tokens To Generate",
+          "type": "integer"
+        },
+        "beam_search_diversity_rate": {
+          "default": 0.0,
+          "title": "Beam Search Diversity Rate",
+          "type": "number"
+        },
+        "beam_width": {
+          "default": 1,
+          "title": "Beam Width",
+          "type": "integer"
+        },
+        "repetition_penalty": {
+          "default": 1.0,
+          "title": "Repetition Penalty",
+          "type": "number"
+        },
+        "length_penalty": {
+          "default": 1.0,
+          "title": "Length Penalty",
+          "type": "number"
+        },
+        "logprobs": {
+          "default": true,
+          "title": "Logprobs",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "service",
+        "model_name"
+      ],
+      "title": "NeMoLLMModelConfig",
+      "type": "object"
+    },
+    "NeMoLLMServiceConfig": {
+      "properties": {
+        "_type": {
+          "const": "nemo",
+          "default": "nemo",
+          "description": "The type of the object",
+          "title": "Type"
+        },
+        "api_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Api Key"
+        },
+        "org_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Org Id"
+        },
+        "retry_count": {
+          "default": 5,
+          "minimum": 0,
+          "title": "Retry Count",
+          "type": "integer"
+        }
+      },
+      "title": "NeMoLLMServiceConfig",
+      "type": "object"
+    },
+    "OpenAIEmbeddingModelConfig": {
+      "properties": {
+        "_type": {
+          "const": "openai",
+          "default": "openai",
+          "description": "The type of the object",
+          "title": "Type"
+        },
+        "openai_api_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Openai Api Key"
+        },
+        "max_retries": {
+          "default": 10,
+          "title": "Max Retries",
+          "type": "integer"
+        },
+        "chunk_size": {
+          "default": 128,
+          "title": "Chunk Size",
+          "type": "integer"
+        }
+      },
+      "title": "OpenAIEmbeddingModelConfig",
+      "type": "object"
+    },
+    "OpenAIModelConfig": {
+      "properties": {
+        "service": {
+          "$ref": "#/$defs/OpenAIServiceConfig"
+        },
+        "model_name": {
+          "title": "Model Name",
+          "type": "string"
+        },
+        "temperature": {
+          "default": 0.0,
+          "title": "Temperature",
+          "type": "number"
+        },
+        "top_p": {
+          "default": 1.0,
+          "title": "Top P",
+          "type": "number"
+        },
+        "seed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seed"
+        },
+        "max_retries": {
+          "default": 10,
+          "title": "Max Retries",
+          "type": "integer"
+        },
+        "json": {
+          "default": false,
+          "title": "Json",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "service",
+        "model_name"
+      ],
+      "title": "OpenAIModelConfig",
+      "type": "object"
+    },
+    "OpenAIServiceConfig": {
+      "properties": {
+        "_type": {
+          "const": "openai",
+          "default": "openai",
+          "description": "The type of the object",
+          "title": "Type"
+        },
+        "api_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Api Key"
+        },
+        "base_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Base Url"
+        }
+      },
+      "title": "OpenAIServiceConfig",
+      "type": "object"
+    },
+    "OutputFileConfig": {
+      "properties": {
+        "_type": {
+          "const": "file",
+          "default": "file",
+          "description": "The type of the object",
+          "title": "Type"
+        },
+        "file_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "./.tmp/agent_morpheus_output.json",
+          "title": "File Path"
+        },
+        "markdown_dir": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": "./.tmp/vulnerability_markdown_reports",
+          "title": "Markdown Dir"
+        },
+        "overwrite": {
+          "default": false,
+          "title": "Overwrite",
+          "type": "boolean"
+        }
+      },
+      "title": "OutputFileConfig",
+      "type": "object"
+    },
+    "OutputPluginConfig": {
+      "properties": {
+        "_type": {
+          "const": "plugin",
+          "default": "plugin",
+          "description": "The type of the object",
+          "title": "Type"
+        },
+        "plugin_name": {
+          "title": "Plugin Name",
+          "type": "string"
+        },
+        "plugin_config": {
+          "default": {},
+          "title": "Plugin Config",
+          "type": "object"
+        }
+      },
+      "required": [
+        "plugin_name"
+      ],
+      "title": "OutputPluginConfig",
+      "type": "object"
+    },
+    "OutputPrintConfig": {
+      "properties": {
+        "_type": {
+          "const": "print",
+          "default": "print",
+          "description": "The type of the object",
+          "title": "Type"
+        }
+      },
+      "title": "OutputPrintConfig",
+      "type": "object"
+    },
+    "PluginInputConfig": {
+      "properties": {
+        "_type": {
+          "const": "plugin",
+          "default": "plugin",
+          "description": "The type of the object",
+          "title": "Type"
+        },
+        "plugin_name": {
+          "title": "Plugin Name",
+          "type": "string"
+        },
+        "plugin_config": {
+          "default": {},
+          "title": "Plugin Config",
+          "type": "object"
+        }
+      },
+      "required": [
+        "plugin_name"
+      ],
+      "title": "PluginInputConfig",
+      "type": "object"
+    },
+    "SBOMPackage": {
+      "description": "Information about a single package in the container image's Software Bill of Materials (SBOM).",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        },
+        "path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Path"
+        },
+        "system": {
+          "title": "System",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version",
+        "system"
+      ],
+      "title": "SBOMPackage",
+      "type": "object"
+    },
+    "ScanInfoInput": {
+      "description": "Information about a unique scan for a container image against a list of vulnerabilies.",
+      "properties": {
+        "id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Id"
+        },
+        "type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Type"
+        },
+        "started_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Started At"
+        },
+        "completed_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completed At"
+        },
+        "vulns": {
+          "items": {
+            "$ref": "#/$defs/VulnInfo"
+          },
+          "minItems": 1,
+          "title": "Vulns",
+          "type": "array"
+        }
+      },
+      "required": [
+        "vulns"
+      ],
+      "title": "ScanInfoInput",
+      "type": "object"
+    },
+    "SourceDocumentsInfo": {
+      "description": "Information about the source documents for the container image.\n\n- type: document type.\n- git_repo: git repo URL where the source documents can be cloned.\n- tag: git tag.\n- include: file extensions to include when indexing the source documents.\n- exclude: file extensions to exclude when indexing the source documents.",
+      "properties": {
+        "type": {
+          "enum": [
+            "code",
+            "doc"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "git_repo": {
+          "minLength": 1,
+          "title": "Git Repo",
+          "type": "string"
+        },
+        "tag": {
+          "minLength": 1,
+          "title": "Tag",
+          "type": "string"
+        },
+        "include": {
+          "default": [
+            "*.py",
+            "*.ipynb"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "title": "Include",
+          "type": "array"
+        },
+        "exclude": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "title": "Exclude",
+          "type": "array"
+        }
+      },
+      "required": [
+        "type",
+        "git_repo",
+        "tag"
+      ],
+      "title": "SourceDocumentsInfo",
+      "type": "object"
+    },
+    "VulnInfo": {
+      "additionalProperties": true,
+      "description": "Information about a vulnerability.",
+      "properties": {
+        "vuln_id": {
+          "title": "Vuln Id",
+          "type": "string"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Score"
+        },
+        "severity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Severity"
+        },
+        "published_date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Published Date"
+        },
+        "last_modified_date": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Modified Date"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        },
+        "feed_group": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Feed Group"
+        },
+        "package": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Package"
+        },
+        "package_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Package Version"
+        },
+        "package_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Package Name"
+        },
+        "package_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Package Type"
+        }
+      },
+      "required": [
+        "vuln_id"
+      ],
+      "title": "VulnInfo",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "general": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/GeneralConfig"
+        }
+      ],
+      "default": {
+        "base_vdb_dir": "/tmp/am_cache/vdb",
+        "base_git_dir": "/tmp/am_cache/git",
+        "enable_llm_list_parsing": false,
+        "cache_dir": null,
+        "ignore_build_vdb_errors": false,
+        "max_retries": 10,
+        "model_max_batch_size": 64,
+        "num_threads": 64,
+        "pipeline_batch_size": 1024,
+        "use_uvloop": true,
+        "code_search_tool": false
+      }
+    },
+    "input": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ManualInputConfig"
+        },
+        {
+          "$ref": "#/$defs/FileInputConfig"
+        },
+        {
+          "$ref": "#/$defs/HttpInputConfig"
+        },
+        {
+          "$ref": "#/$defs/PluginInputConfig"
+        }
+      ],
+      "title": "Input"
+    },
+    "engine": {
+      "$ref": "#/$defs/EngineConfig"
+    },
+    "output": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/OutputPrintConfig"
+        },
+        {
+          "$ref": "#/$defs/OutputFileConfig"
+        },
+        {
+          "$ref": "#/$defs/OutputPluginConfig"
+        }
+      ],
+      "title": "Output"
+    }
+  },
+  "required": [
+    "input",
+    "engine",
+    "output"
+  ],
+  "title": "RunConfig",
+  "type": "object"
+}

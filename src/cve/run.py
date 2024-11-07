@@ -1,0 +1,409 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+import logging
+import os
+
+import click
+import json5
+from click.core import ParameterSource
+
+from morpheus.utils.http_utils import HTTPMethod
+
+from .data_models.config import FileInputConfig
+from .data_models.config import GeneralConfig
+from .data_models.config import HttpInputConfig
+from .data_models.config import ManualInputConfig
+from .data_models.config import OutputFileConfig
+from .data_models.config import OutputPrintConfig
+from .data_models.config import RunConfig
+from .data_models.input import AgentMorpheusInput
+from .data_models.input import ImageInfoInput
+from .data_models.input import ManualSBOMInfoInput
+from .data_models.input import ScanInfoInput
+from .data_models.input import VulnInfo
+from .utils.string_utils import is_valid_cve_id
+
+logger = logging.getLogger(__name__)
+
+
+def validate_cve_id(ctx, param, value):
+    for item in value:
+        if not is_valid_cve_id(item):
+            raise click.BadParameter(f"{item} is not a valid CVE ID format. Correct format: 'CVE-[YEAR]-[NUMBER]'.")
+        if not is_valid_cve_id(item):
+            raise click.BadParameter(f"{item} is not a valid CVE ID format. Correct format: 'CVE-[YEAR]-[NUMBER]'.")
+    return value
+
+
+def _was_argument_defined(ctx: click.Context, arg_name: str):
+
+    # Clean up the arg_name just in case
+    arg_name = arg_name.replace("-", "_").lower()
+
+    arg_source = ctx.get_parameter_source(arg_name)
+
+    assert arg_source is not None, f"Argument '{arg_name}' was not found in the context. Check the spelling."
+
+    return arg_source != ParameterSource.DEFAULT
+
+
+@click.group(name=__name__, help="Run the Vulnerability Analysis for Container Security pipeline")
+def run():
+    pass
+
+
+@run.group(invoke_without_command=True)
+@click.option(
+    "--config_file",
+    type=str,
+    default=None,
+    show_envvar=True,
+    help=("A json file that sets the parameters for the pipeline and the models "
+          "inside the pipeline."),
+)
+def pipeline(**kwargs):
+    pass
+
+
+@pipeline.result_callback(replace=True)
+def process_pipeline(processors, config_file: str):
+    from .pipeline import pipeline as _pipeline
+
+    run_config = RunConfig.model_construct()
+
+    if config_file is not None:
+        with open(config_file, 'r') as config_in:
+
+            run_config_json = json5.load(config_in)
+
+        run_config = RunConfig.model_validate(run_config_json)
+
+    for processor in processors or []:
+        run_config = processor(run_config)
+
+    # Make sure we still have a valid config object
+    run_config = RunConfig.model_validate(run_config.model_dump(by_alias=True))
+
+    return _pipeline(run_config)
+
+
+@pipeline.group('config', chain=True, help="This command can be used to override specific configuration file options")
+def config():
+    pass
+
+
+@config.command('input-manual',
+                help="Sets the input type to 'manual' and allows for setting options for the manual input.")
+@click.option(
+    "--scan-vuln-id",
+    type=str,
+    multiple=True,
+    help=("The vulnerability ID to scan. Using this option overwrites any existing vulnerabilities."),
+)
+@click.option(
+    "--add-scan-vuln-id",
+    type=str,
+    multiple=True,
+    help=("The vulnerability ID to scan. Using this option appends to any existing vulnerabilities."),
+)
+@click.option(
+    "--repeat_count",
+    type=int,
+    default=ManualInputConfig.model_fields['repeat_count'].default,
+    help=("The number of times to repeat the input data."),
+)
+@click.pass_context
+def config_input_manual(ctx: click.Context, **kwargs):
+
+    def processor(run_config: RunConfig) -> RunConfig:
+        override_kwargs = ManualInputConfig(
+            message=AgentMorpheusInput(scan=ScanInfoInput(vulns=[]),
+                                       image=ImageInfoInput(source_info=[], sbom_info=ManualSBOMInfoInput(
+                                           packages=[])))).model_dump(by_alias=True)
+
+        if (run_config.input.type == 'manual'):
+            override_kwargs = run_config.input.model_dump(by_alias=True)
+
+        if (_was_argument_defined(ctx, 'scan-vuln-id')):
+
+            override_kwargs['message']['scan']['vulns'] = [{'vuln_id': vuln_id} for vuln_id in kwargs['scan_vuln_id']]
+
+        if (_was_argument_defined(ctx, 'add-scan-vuln-id')):
+
+            override_kwargs['message']['scan']['vulns'].extend(
+                [VulnInfo(vuln_id=vuln_id).model_dump(by_alias=True) for vuln_id in kwargs['add_scan_vuln_id']])
+
+        if (_was_argument_defined(ctx, 'repeat_count')):
+            override_kwargs['repeat_count'] = kwargs['repeat_count']
+
+        run_config.input = ManualInputConfig.model_validate(override_kwargs)
+
+        return run_config
+
+    return processor
+
+
+@config.command('input-file', help="Sets the input type to 'file' and allows for setting options for the file input.")
+@click.option(
+    "--file",
+    type=str,
+    default=None,
+    help=("A JSON file which represents an instance of AgentMorpheusInput parameters."),
+)
+@click.option(
+    "--repeat_count",
+    type=int,
+    default=FileInputConfig.model_fields['repeat_count'].default,
+    help=("The number of times to repeat the input data."),
+)
+@click.pass_context
+def config_input_file(ctx: click.Context, **kwargs):
+
+    def processor(run_config: RunConfig) -> RunConfig:
+
+        override_kwargs = {}
+
+        if (run_config.input.type == 'file'):
+            override_kwargs = run_config.input.model_dump(by_alias=True)
+
+        if (_was_argument_defined(ctx, 'file')):
+            override_kwargs['file'] = kwargs['file']
+        if (_was_argument_defined(ctx, 'repeat_count')):
+            override_kwargs['repeat_count'] = kwargs['repeat_count']
+
+        run_config.input = FileInputConfig.model_validate(override_kwargs)
+
+        return run_config
+
+    return processor
+
+
+@config.command('input-http', help="Sets the input type to 'http' and allows for setting options for the HTTP input.")
+@click.option(
+    "--address",
+    type=str,
+    default=HttpInputConfig.model_fields['address'].default,
+    help=("The HTTP address to bind to."),
+)
+@click.option(
+    "--endpoint",
+    type=str,
+    default=HttpInputConfig.model_fields['endpoint'].default,
+    help=("The HTTP endpoint to listen on."),
+)
+@click.option(
+    "--port",
+    type=str,
+    default=HttpInputConfig.model_fields['port'].default,
+    help=("The HTTP port to listen on."),
+)
+@click.option(
+    "--http_method",
+    type=HTTPMethod,
+    default=HttpInputConfig.model_fields['http_method'].default,
+    help=("The HTTP method to listen for.Valid values: "
+          f"{', '.join([v.value for v in HTTPMethod])}"),
+)
+@click.pass_context
+def config_input_http(ctx: click.Context, **kwargs):
+
+    def processor(run_config: RunConfig) -> RunConfig:
+        override_kwargs = HttpInputConfig().model_dump(by_alias=True)
+
+        if (run_config.input.type == 'http'):
+            override_kwargs = run_config.input.model_dump(by_alias=True)
+
+        if (_was_argument_defined(ctx, 'address')):
+            override_kwargs['address'] = kwargs['address']
+
+        if (_was_argument_defined(ctx, 'endpoint')):
+            override_kwargs['endpoint'] = kwargs['endpoint']
+
+        if (_was_argument_defined(ctx, 'port')):
+            override_kwargs['port'] = kwargs['port']
+
+        if (_was_argument_defined(ctx, 'http_method')):
+            override_kwargs['http_method'] = kwargs['http_method']
+
+        run_config.input = HttpInputConfig.model_validate(override_kwargs)
+
+        return run_config
+
+    return processor
+
+
+@config.command('general', help="Allows for setting general config options")
+@click.option(
+    "--base_vdb_dir",
+    type=str,
+    default=GeneralConfig.model_fields['base_vdb_dir'].default,
+    help=("The base directory to store the VDB files."),
+)
+@click.option(
+    "--base_git_dir",
+    type=str,
+    default=GeneralConfig.model_fields['base_git_dir'].default,
+    help=("The base directory to clone Git repositories."),
+)
+@click.option(
+    "--enable_llm_list_parsing",
+    type=bool,
+    is_flag=True,
+    default=GeneralConfig.model_fields['enable_llm_list_parsing'].default,
+    help=("Adds an additional call to the LLM to parse the the returned checklist. "
+          "Enable if the LLM isn't able to return valid JSON."),
+)
+@click.option(
+    "--cache_dir",
+    type=str,
+    default=GeneralConfig.model_fields['cache_dir'].default,
+    help=("The directory to use for caching. If not specified, no caching will be used."),
+)
+@click.option(
+    "--ignore_build_vdb_errors",
+    type=bool,
+    is_flag=True,
+    default=GeneralConfig.model_fields['ignore_build_vdb_errors'].default,
+    help=("Whether or not to ignore errors when building the VDB."),
+)
+@click.option(
+    "--max_retries",
+    type=str,
+    default=GeneralConfig.model_fields['max_retries'].default,
+    help=("Maximum number of retries for a failed HTTP request."),
+)
+@click.option(
+    "--model_max_batch_size",
+    type=str,
+    default=GeneralConfig.model_fields['model_max_batch_size'].default,
+    help=("Maximum batch size to use for the model."),
+)
+@click.option(
+    "--num_threads",
+    type=str,
+    default=GeneralConfig.model_fields['num_threads'].default,
+    help=("The number of threads to use for the pipeline."),
+)
+@click.option(
+    "--pipeline_batch_size",
+    type=str,
+    default=GeneralConfig.model_fields['pipeline_batch_size'].default,
+    help=("The batch size to use for the pipeline."),
+)
+@click.option(
+    "--use_uvloop",
+    type=bool,
+    default=GeneralConfig.model_fields['use_uvloop'].default,
+    help=("Whether to use uvloop for the event loop. This can provide a significant speedup in some cases. "
+          "Disabling can give more helpful error messages"),
+)
+@click.pass_context
+def config_general(ctx: click.Context, **kwargs):
+
+    def processor(run_config: RunConfig) -> RunConfig:
+        override_kwargs = run_config.general.model_dump(by_alias=True)
+
+        for arg in kwargs.keys():
+
+            if (_was_argument_defined(ctx, arg)):
+                override_kwargs[arg] = kwargs[arg]
+
+        run_config.general = GeneralConfig.model_validate(override_kwargs)
+
+        return run_config
+
+    return processor
+
+
+@config.command('output-print',
+                help="Sets the output type to 'print' and allows for setting options for the print output.")
+@click.pass_context
+def config_output_print(ctx: click.Context, **kwargs):
+
+    def processor(run_config: RunConfig) -> RunConfig:
+        override_kwargs = OutputPrintConfig().model_dump(by_alias=True)
+
+        if (run_config.output.type == 'print'):
+            override_kwargs = run_config.output.model_dump(by_alias=True)
+
+        run_config.output = OutputPrintConfig.model_validate(override_kwargs)
+
+        return run_config
+
+    return processor
+
+
+@config.command('output-file',
+                help="Sets the output type to 'file' and allows for setting options for the file output.")
+@click.option("--file_path",
+              type=str,
+              default=OutputFileConfig.model_fields['file_path'].default,
+              help=("The path to the output file."))
+@click.option("--overwrite",
+              type=bool,
+              is_flag=True,
+              default=OutputFileConfig.model_fields['overwrite'].default,
+              help=("Whether or not to overwrite the output file."))
+@click.option("--markdown_dir",
+              type=str,
+              default=OutputFileConfig.model_fields['markdown_dir'].default,
+              help=("The path to the directory that will store the output markdown reports."))
+@click.pass_context
+def config_output_file(ctx: click.Context, **kwargs):
+
+    def processor(run_config: RunConfig) -> RunConfig:
+        override_kwargs = run_config.general.model_dump(by_alias=True)
+
+        for arg in kwargs.keys():
+
+            if (_was_argument_defined(ctx, arg)):
+                override_kwargs[arg] = kwargs[arg]
+
+        run_config.output = OutputFileConfig.model_validate(override_kwargs)
+
+        return run_config
+
+    return processor
+
+
+def _relative_path(abs_path: str) -> str:
+    return os.path.relpath(abs_path, os.getcwd())
+
+
+@run.group(help="Set of tools for the LLM examples.")
+def tools():
+    pass
+
+
+@tools.command(help="Generates the JSON schema for the configuration file.")
+@click.option(
+    '--output_file',
+    type=str,
+    default=_relative_path(os.path.abspath(os.path.join(__file__, "../../configs/schemas/config.schema.json"))),
+    required=True,
+    help=("The output file to write the schema to."),
+)
+def gen_config_schema(output_file: str):
+
+    # Ensure the directory exists
+    os.makedirs(os.path.dirname(output_file), exist_ok=True)
+
+    with open(output_file, "w") as out_file:
+
+        json5.dump(RunConfig.generate_json_schema(), fp=out_file, indent=2, quote_keys=True, trailing_commas=False)
+
+    logger.info("Generated JSON schema for the configuration file at '%s'.", output_file)

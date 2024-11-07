@@ -1,0 +1,91 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+import logging
+
+from morpheus_llm.llm import LLMLambdaNode
+from morpheus_llm.llm import LLMNode
+from morpheus_llm.llm.nodes.llm_generate_node import LLMGenerateNode
+from morpheus_llm.llm.nodes.prompt_template_node import PromptTemplateNode
+from morpheus_llm.llm.services.llm_service import LLMClient
+
+from ..utils.string_utils import get_checklist_item_string
+
+logger = logging.getLogger(__name__)
+
+SUMMARY_PROMPT = """Summarize the exploitability investigation results of a Common Vulnerabilities and Exposures (CVE) \
+based on the provided Checklist and Findings. Write a concise paragraph focusing only on checklist items with \
+definitive answers. Begin your response by clearly stating whether the CVE is exploitable. Disregard any ambiguous \
+checklist items.
+Checklist and Findings:
+{{response}}"""
+
+
+class CVESummaryNode(LLMNode):
+    """
+    A node to summarize the results of the checklist responses.
+    """
+
+    def __init__(self, *, llm_client: LLMClient):
+        """
+        Initialize the CVESummaryNode with a selected model.
+
+        Parameters
+        ----------
+        llm_client : LLMClient
+            The LLM client to use for generating the summary.
+        """
+        super().__init__()
+
+        async def build_summary_output(checklist_inputs: list[list[str]],
+                                       checklist_outputs: list[list[str]],
+                                       intermediate_steps: list[list[list]]) -> list[list[dict]]:
+            summary_output = []
+
+            for check_in, check_out, steps in zip(checklist_inputs, checklist_outputs, intermediate_steps):
+                summary_output.append([{
+                    "question": q, "response": r, "intermediate_steps": s
+                } for q, r, s in zip(check_in, check_out, steps)])  # yapf: disable
+
+            return summary_output
+
+        # Build the output for the checklist as a list of dictionaries
+        self.add_node("checklist",
+                      inputs=["checklist_inputs", "checklist_outputs", "intermediate_steps"],
+                      node=LLMLambdaNode(build_summary_output),
+                      is_output=True)
+
+        # Concatenate the output of the checklist responses into a single string
+        async def concat_checklist_responses(agent_q_and_a: list[list[dict]]) -> list[str]:
+            concatted_responses = []
+
+            for checklist in agent_q_and_a:
+                checklist_str = '\n'.join([get_checklist_item_string(i + 1, item) for i, item in enumerate(checklist)])
+                concatted_responses.append(checklist_str)
+
+            return concatted_responses
+
+        self.add_node('results', inputs=['/checklist'], node=LLMLambdaNode(concat_checklist_responses))
+
+        self.add_node('summary_prompt',
+                      inputs=[('/results', 'response')],
+                      node=PromptTemplateNode(template=SUMMARY_PROMPT, template_format='jinja'))
+
+        # Generate a summary from the combined checklist responses
+        self.add_node("summary",
+                      inputs=["/summary_prompt"],
+                      node=LLMGenerateNode(llm_client=llm_client),
+                      is_output=True)

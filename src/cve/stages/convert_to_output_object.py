@@ -1,0 +1,146 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+import json
+import logging
+
+from morpheus.messages import ControlMessage
+from morpheus.pipeline.stage_decorator import stage
+
+from ..data_models.cve_intel import CveIntel
+from ..data_models.dependencies import VulnerableDependencies
+from ..data_models.info import AgentMorpheusInfo
+from ..data_models.input import AgentMorpheusInput
+from ..data_models.output import AgentIntermediateStep
+from ..data_models.output import AgentMorpheusEngineOutput
+from ..data_models.output import AgentMorpheusOutput
+from ..data_models.output import ChecklistItemOutput
+from ..data_models.output import JustificationOutput
+
+logger = logging.getLogger(__name__)
+
+
+def _parse_checklist_item(item: dict) -> ChecklistItemOutput:
+    """
+    Parse checklist item dict into a ChecklistItemOutput object.
+    """
+
+    # If intermediate steps are available, parse them to a list of AgentIntermediateStep objects
+    if item["intermediate_steps"] is not None:
+        intermediate_steps = []
+        for step in item["intermediate_steps"]:
+
+            intermediate_step = AgentIntermediateStep.model_validate(step)
+
+            # Try reading the JSON-serialized output string back to structured data
+            assert isinstance(intermediate_step.tool_output, str) == True, \
+                f"Expecting tool output to be a string but got {type(intermediate_step.tool_output)}."
+            try:
+                intermediate_step.tool_output = json.loads(intermediate_step.tool_output)
+            except Exception:
+                logger.warning("Error deserializing tool output JSON, leaving as string: %s",
+                               f"{intermediate_step.tool_output[:100]}...")
+
+            intermediate_steps.append(intermediate_step)
+    else:
+        intermediate_steps = item["intermediate_steps"]
+
+    return ChecklistItemOutput(input=item["question"], response=item["response"], intermediate_steps=intermediate_steps)
+
+
+def _parse_agent_morpheus_engine_output(row: dict) -> AgentMorpheusEngineOutput:
+    """
+    Parse the output row for a single vulnerability into an AgentMorpheusEngineOutput object.
+    """
+    # Convert list of checklist item dicts to list of ChecklistItemOutput objects
+    checklist_output = [_parse_checklist_item(item) for item in row['checklist']]
+
+    # Combine justification model outputs into a single JustificationOutput object
+    justification_output = JustificationOutput(label=row['justification_label'],
+                                               reason=row['justification'],
+                                               status=row['affected_status'])
+
+    return AgentMorpheusEngineOutput(vuln_id=row['vuln_id'],
+                                     checklist=checklist_output,
+                                     summary=row['summary'],
+                                     justification=justification_output)
+
+
+def _get_placeholder_output(vuln_id: str) -> AgentMorpheusEngineOutput:
+    SUMMARY = "The VulnerableDependencyChecker did not find any vulnerable packages or dependencies in the SBOM."
+    JUSTIFICATION = JustificationOutput(label="code_not_present",
+                                        reason="No vulnerable packages or dependencies were detected in the SBOM.",
+                                        status="FALSE")
+    return AgentMorpheusEngineOutput(
+        vuln_id=vuln_id,
+        checklist=[
+            ChecklistItemOutput(
+                input="Check SBOM and dependencies for vulnerability.",
+                response=
+                "The VulnerableDependencyChecker did not find any vulnerable packages or dependencies in the SBOM.",
+                intermediate_steps=None)
+        ],
+        summary=SUMMARY,
+        justification=JUSTIFICATION)
+
+
+@stage
+def convert_to_output_object(message: ControlMessage) -> AgentMorpheusOutput:
+    """
+    Takes a ControlMessage containing input, info, and output data and returns an AgentMorpheusOutput object.
+    """
+
+    # Pull input and info objects from control message metadata
+    input: AgentMorpheusInput = message.get_metadata("input")
+    intel: list[CveIntel] = message.get_metadata("info.intel")
+    vdb: AgentMorpheusInfo.VdbPaths = message.get_metadata("info.vdb")
+    sbom: AgentMorpheusInfo.SBOMInfo = message.get_metadata("info.sbom")
+    vulnerable_dependencies: list[VulnerableDependencies] = message.get_metadata("info.vulnerable_dependencies")
+
+    filtered_vulns = [
+        vuln_dep.vuln_id for vuln_dep in vulnerable_dependencies if len(vuln_dep.vulnerable_sbom_packages) == 0
+    ]
+
+    # Extract LLMEngine output from message df to dict of {vuln_id: row}
+    with message.payload().mutable_dataframe() as df:
+        df2 = df.set_index("vuln_id", drop=False)
+        llm_engine_output = df2.to_dict(orient="index")
+
+    input_vuln_ids = [vuln.vuln_id for vuln in input.scan.vulns]
+
+    # For each vuln_id, get LLMEngine output if it exists
+    # or create placeholder output if it had no vulnerable dependencies and skipped the LLMEngine
+    output: list[AgentMorpheusEngineOutput] = []
+    for vuln_id in input_vuln_ids:
+
+        if vuln_id in llm_engine_output:
+            output.append(_parse_agent_morpheus_engine_output(llm_engine_output[vuln_id]))
+
+        elif vuln_id in filtered_vulns:
+            output.append(_get_placeholder_output(vuln_id))
+
+        else:
+            assert False, "CVE has vulnerable dependencies but there is no LLMEngine output."
+
+    for out in output:
+        logger.info(f"Vulnerability '{out.vuln_id}' affected status: {out.justification.status}. "
+                    f"Label: {out.justification.label}")
+
+    # Make intermediate info object
+    info = AgentMorpheusInfo(vdb=vdb, intel=intel, sbom=sbom, vulnerable_dependencies=vulnerable_dependencies)
+
+    # Return final output object
+    return AgentMorpheusOutput(input=input, info=info, output=output)

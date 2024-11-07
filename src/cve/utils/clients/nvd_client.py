@@ -1,0 +1,290 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+import logging
+import os
+import re
+
+import aiohttp
+from bs4 import BeautifulSoup
+
+from ...data_models.cve_intel import CveIntelNvd
+from ..async_http_utils import request_with_retry
+from ..intel_utils import parse
+from ..url_utils import url_join
+from .intel_client import IntelClient
+
+logger = logging.getLogger(f"morpheus.{__name__}")
+
+
+class NVDClient(IntelClient):
+    """
+    Async client for NIST's NVD API
+
+    While not strictly required, obtaining an API key is recommended, to obtain one refer:
+    https://nvd.nist.gov/developers/start-here
+    """
+
+    CWE_NAME_RE = re.compile(r'^.*?-\s*')
+    VENDOR_HREF_RE = re.compile('/vendor/')
+    CVE_DETAILS_URL = "https://www.cvedetails.com"
+    CWE_DETAILS_URL = "http://cwe.mitre.org"
+
+    def __init__(self,
+                 *,
+                 base_url: str | None = None,
+                 api_key: str | None = None,
+                 lang_code: str = 'en',
+                 session: aiohttp.ClientSession | None = None,
+                 retry_count: int = 10,
+                 sleep_time: float = 0.1,
+                 respect_retry_after_header: bool = True):
+
+        super().__init__(session=session,
+                         base_url=base_url or os.environ.get('NVD_BASE_URL'),
+                         retry_count=retry_count,
+                         sleep_time=sleep_time,
+                         respect_retry_after_header=respect_retry_after_header)
+
+        self._api_key = api_key or os.environ.get('NVD_API_KEY', None)
+
+        self._cve_details_url_template = url_join(os.environ.get('CVE_DETAILS_BASE_URL', self.CVE_DETAILS_URL),
+                                                  "cve",
+                                                  "{CVE_ID}")
+        self._cwe_details_url_template = url_join(os.environ.get('CWE_DETAILS_BASE_URL', self.CWE_DETAILS_URL),
+                                                  "data/definitions",
+                                                  "{CWE_ID}.html")
+
+        self._lang_code = lang_code
+
+        self._headers = {'Content-Type': 'application/json'}
+
+        if self._api_key is not None:
+            self._headers['apiKey'] = self._api_key
+
+    @classmethod
+    def default_base_url(cls) -> str:
+        return "https://services.nvd.nist.gov/rest"
+
+    async def _get_soup(self, url: str) -> BeautifulSoup:
+
+        async with request_with_retry(session=self._session,
+                                      request_kwargs={
+                                          'method': 'GET',
+                                          'url': url,
+                                          "skip_auto_headers": {"User-Agent"},
+                                      },
+                                      max_retries=self._retry_count) as response:
+            return BeautifulSoup(await response.text(), 'html.parser')
+
+    def _get_cvss_vector_from_metric(self, metrics: dict, metric_version: str) -> str | None:
+        versioned_metrics = metrics[metric_version]
+        for metric_type in ('primary', 'secondary'):
+            for metric in versioned_metrics:
+                if metric['type'].lower() == metric_type:
+                    return metric['cvssData']['vectorString']
+
+    def _get_cwe(self, cwes: list[dict]) -> str | None:
+        for cwe_type in ('primary', 'secondary'):
+            for cwe in cwes:
+                if cwe['type'].lower() == cwe_type:
+                    cwe_descriptions = cwe['description']
+                    for cwe_description in cwe_descriptions:
+                        if cwe_description['lang'] == self._lang_code:
+                            return cwe_description['value']
+
+    async def _get_cwe_elements(self, cve_obj: dict) -> dict:
+        """
+        Asynchronously extract CWE (Common Weakness Enumeration) elements from the CVE object, and retreive details for
+        those CWEs.
+        """
+        # Get CWE name
+        cwe_id = None
+        weaknesses = cve_obj.get('weaknesses', [])
+        cwe_id = self._get_cwe(weaknesses)
+        cwe_link = None
+        cwe_name = None
+        cwe_description = None
+        cwe_extended_description = None
+        if cwe_id is not None:
+            if cwe_id.startswith('CWE-'):
+                cwe_id = cwe_id.replace('CWE-', '', 1)
+
+            if cwe_id.isnumeric():
+                cwe_link = self._cwe_details_url_template.format(CWE_ID=cwe_id)
+
+        if cwe_link is not None:
+            soup = await self._get_soup(cwe_link)
+
+            if soup is not None:
+                title_tag = soup.find('title')
+                if title_tag:
+                    cwe_name = title_tag.string.strip()
+                    cwe_name = self.CWE_NAME_RE.sub('', cwe_name).strip()
+                    description_div = soup.find('div', id='Description')
+                    if description_div:
+                        cwe_description = description_div.find('div', class_='indent').text.strip()
+
+                    extended_description_div = soup.find('div', id='Extended_Description')
+                    if extended_description_div:
+                        cwe_extended_description = extended_description_div.find('div', class_='indent').text.strip()
+
+        return {
+            "cwe_name": cwe_name,
+            "cwe_description": cwe_description,
+            "cwe_extended_description": cwe_extended_description,
+        }
+
+    def _parse_nvd_cvss_vector(self, cve_obj: dict) -> str | None:
+        """
+        Extract the CVSS vector from a CVE json object.
+
+        Parameters
+        ----------
+        cve_obj : dict
+            The cve sub-dictionary of the JSON document.
+
+        Returns
+        -------
+        str or None
+            The CVSS vector string, if found. Otherwise, None.
+        """
+        # metrics is optional https://nvd.nist.gov/developers/vulnerabilities
+        metrics = cve_obj.get('metrics')
+        if metrics is not None:
+            # Attempt to find the CVSS vector in order of preference
+            for metric_version in ('cvssMetricV31', 'cvssMetricV30'):
+                try:
+                    cvss_vector = self._get_cvss_vector_from_metric(metrics, metric_version)
+                    if cvss_vector is not None:
+                        return cvss_vector
+                except KeyError:
+                    continue
+
+    async def _get_vendor_names(self, cve_details_url: str) -> list[str] | None:
+        """
+        Asynchronously retrieve vendor names associated with the CVE from the CVE Details page.
+
+        Parameters
+        ----------
+        session : aiohttp.ClientSession
+            The session used to make HTTP requests.
+        cve_details_url : str
+            The URL to the CVE details page.
+
+        Returns
+        -------
+        list of str or None
+            A list of vendor names associated with the CVE, if found. Otherwise, None.
+        """
+
+        try:
+            # This website has been blocking non-browser user agents with a 403, don't spend time retrying
+            # as Rachel has code to replace it
+            soup = await self._get_soup(cve_details_url)
+
+            # Find all the vendor names within the <a> tags
+            if soup is not None:
+                vendor_tags = soup.find_all('a', href=self.VENDOR_HREF_RE)
+                if vendor_tags:
+                    # Extract the unique text from the vendor tags
+                    # Make sure to return the sorted list for consistency
+                    return sorted(set(tag.text.strip() for tag in vendor_tags))
+
+        except Exception as e:
+            logger.error("Error fetching vendor names for %s : %s", cve_details_url, e)
+
+        return None
+
+        # if vuln_feed is not None and 'ubuntu' in vuln_feed:
+        #     try:
+        #         soup = await self._get_soup(session, vuln_url, max_retries=max_retries)
+
+        #         security_team_header = soup.find('h2', string='From the Ubuntu Security Team')
+        #         if security_team_header is not None:
+        #             security_team_note = security_team_header.find_next_sibling('p')
+        #             ubuntu_security_note = security_team_note.get_text(strip=True) if security_team_note else None
+        #         else:
+        #             ubuntu_security_note = None
+
+        #         # Extracting the priority reason
+        #         priority_reason_pre = soup.find('pre')
+        #         ubuntu_priority_reason = priority_reason_pre.text.strip() if priority_reason_pre else None
+
+        #         # Extracting the priority level
+        #         priority_level_p = soup.find('p', class_='p-heading-icon__title u-no-margin--bottom p-heading--4')
+        #         ubuntu_priority_level = priority_level_p.text.strip() if priority_level_p else None
+
+        #         ubuntu_intel.ubuntu_security_note = ubuntu_security_note
+        #         ubuntu_intel.ubuntu_priority_reason = ubuntu_priority_reason
+        #         ubuntu_intel.ubuntu_priority_level = ubuntu_priority_level
+        #     except Exception as e:
+        #         logger.error("Error fetching Ubuntu security information for %s : %s", vuln_url, e)
+
+        # return ubuntu_intel
+
+    async def get_intel_dict(self, cve_id: str) -> dict:
+
+        response = await self.request(method="GET",
+                                      url=url_join(self.base_url, 'json/cves/2.0'),
+                                      params={'cveId': cve_id},
+                                      headers=self._headers)
+
+        # Get the vulnerabilities from the dict
+        vulns = response.get("vulnerabilities", [])
+
+        if (len(vulns) == 0):
+            raise ValueError(f"Could not find CVE entry for {cve_id}")
+
+        if (len(vulns) > 1):
+            logger.warning(f"Found multiple CVE entries for {cve_id}, using the first one")
+
+        return vulns[0]
+
+    async def get_intel(self, cve_id: str) -> CveIntelNvd:
+        """
+        Get the CVE Intel object for the given CVE ID
+
+        Args:
+            cve_id (str): The CVE ID to get the Intel for
+
+        Returns:
+            CveIntelNvd: The CVE Intel object
+        """
+        intel_dict = await self.get_intel_dict(cve_id)
+
+        cve_vuln: dict = intel_dict.get("cve", {})
+
+        cve_description = "\n".join(
+            desc.get('value', '') for desc in cve_vuln.get('descriptions', []) if desc.get('lang') == self._lang_code)
+
+        cve_configurations = parse(cve_vuln.get('configurations', []))
+        cvss_vector = self._parse_nvd_cvss_vector(cve_vuln)
+        cwe_elements = await self._get_cwe_elements(cve_vuln)
+
+        cve_details_url = self._cve_details_url_template.format(CVE_ID=cve_id)
+        vendor_names = await self._get_vendor_names(cve_details_url)
+
+        intel = CveIntelNvd(cve_id=cve_id,
+                            cve_description=cve_description,
+                            cvss_vector=cvss_vector,
+                            cwe_name=cwe_elements["cwe_name"],
+                            cwe_description=cwe_elements["cwe_description"],
+                            cwe_extended_description=cwe_elements["cwe_extended_description"],
+                            configurations=cve_configurations,
+                            vendor_names=vendor_names)
+
+        return intel

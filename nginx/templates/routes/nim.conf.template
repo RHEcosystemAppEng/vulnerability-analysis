@@ -1,0 +1,45 @@
+
+set $upstream_nim_llm ${NGINX_UPSTREAM_NIM_LLM};
+set $upstream_nim_embed ${NGINX_UPSTREAM_NIM_EMBED};
+
+location /nim_llm {
+   location ~* ^\/nim_llm\/v1\/(?:chat\/completions|completions|edits|moderations|answers)$ {
+         rewrite ^\/nim_llm(\/.*)$ $1 break;
+         proxy_pass $upstream_nim_llm;
+         proxy_set_header Connection '';
+         proxy_set_header Authorization $nim_http_authorization;
+         proxy_cache llm_cache;
+         proxy_cache_methods GET POST;
+         proxy_cache_key "$request_method|$request_uri|$request_body";
+         add_header X-Cache-Status $upstream_cache_status;
+         client_body_buffer_size 4m;
+   }
+
+   location /nim_llm/v1 {
+         rewrite ^\/nim_llm(\/.*)$ $1 break;
+         proxy_pass $upstream_nim_llm;
+         access_log /dev/stdout no_cache_log;
+         access_log /var/log/nginx/access.log no_cache_log;
+   }
+}
+
+location /nim_embed {
+   location ~* ^\/nim_embed\/v1\/(?:embeddings)$ {
+         rewrite ^\/nim_embed(\/.*)$ $1 break;
+         proxy_pass $upstream_nim_embed;
+         proxy_set_header Connection '';
+         proxy_set_header Authorization $nim_http_authorization;
+         proxy_cache llm_cache;
+         proxy_cache_methods GET POST;
+         proxy_cache_key "$request_method|$request_uri|$request_body";
+         add_header X-Cache-Status $upstream_cache_status;
+         client_body_buffer_size 4m;
+   }
+
+   location /nim_embed/v1 {
+         rewrite ^\/nim_embed(\/.*)$ $1 break;
+         proxy_pass $upstream_nim_embed;
+         access_log /dev/stdout no_cache_log;
+         access_log /var/log/nginx/access.log no_cache_log;
+   }
+}

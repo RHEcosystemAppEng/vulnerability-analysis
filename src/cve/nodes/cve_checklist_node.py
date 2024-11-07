@@ -1,0 +1,154 @@
+# SPDX-FileCopyrightText: Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+
+import ast
+import logging
+
+from morpheus_llm.llm import LLMLambdaNode
+from morpheus_llm.llm import LLMNode
+from morpheus_llm.llm.nodes.llm_generate_node import LLMGenerateNode
+from morpheus_llm.llm.nodes.prompt_template_node import PromptTemplateNode
+from morpheus_llm.llm.services.llm_service import LLMService
+
+from ..data_models.config import LLMModelConfig
+from ..utils.prompting import MOD_FEW_SHOT
+from ..utils.prompting import additional_intel_prompting
+from ..utils.prompting import get_mod_examples
+from ..utils.string_utils import attempt_fix_list_string
+
+logger = logging.getLogger(__name__)
+
+cve_prompt1 = (
+    MOD_FEW_SHOT.format(examples=get_mod_examples())
+    + additional_intel_prompting
+    + "\nThe vulnerable version of the vulnerable package is already verified to be installed within the container. Check only the other factors that affect exploitability, no need to verify version again."
+)
+
+cve_prompt2 = """Parse the following numbered checklist into a python list in the format ["x", "y", "z"], a comma separated list surrounded by square braces: {{template}}"""
+
+
+async def _parse_list(text: list[str]) -> list[list[str]]:
+    """
+    Asynchronously parse a list of strings, each representing a list, into a list of lists.
+
+    Parameters
+    ----------
+    text : list of str
+        A list of strings, each intended to be parsed into a list.
+
+    Returns
+    -------
+    list of lists of str
+        A list of lists, parsed from the input strings.
+
+    Raises
+    ------
+    ValueError
+        If the string cannot be parsed into a list or if the parsed object is not a list.
+
+    Notes
+    -----
+    This function tries to fix strings that represent lists with unescaped quotes by calling
+    `attempt_fix_list_string` and then uses `ast.literal_eval` for safe parsing of the string into a list.
+    It ensures that each element of the parsed list is actually a list and will raise an error if not.
+    """
+    return_val = []
+
+    for checklist_num, x in enumerate(text):
+        try:
+            # Try to cut out verbosity:
+            x = x[x.rfind('['):x.find(']') + 1]
+
+            # Remove newline characters that can cause incorrect string escaping in the next step
+            x = x.replace("\n", "")
+
+            # Try to do some very basic string cleanup to fix unescaped quotes
+            x = attempt_fix_list_string(x)
+
+            # Only proceed if the input is a valid Python literal
+            # This isn't really dangerous, literal_eval only evaluates a small subset of python
+            current = ast.literal_eval(x)
+
+            # Ensure that the parsed data is a list
+            if not isinstance(current, list):
+                raise ValueError(f"Input is not a list: {x}")
+
+            # Process the list items
+            for i in range(len(current)):
+                if (isinstance(current[i], list) and len(current[i]) == 1):
+                    current[i] = current[i][0]
+
+            return_val.append(current)
+        except (ValueError, SyntaxError) as e:
+            # Handle the error, log it, or re-raise it with additional context
+            raise ValueError(f"Failed to parse input for checklist number {checklist_num}: {x}. Error: {e}")
+
+    return return_val
+
+
+class CVEChecklistNode(LLMNode):
+    """
+    A node that orchestrates the process of generating a checklist for CVE (Common Vulnerabilities and Exposures) items.
+    It integrates various nodes that handle CVE lookup, prompting, generation, and parsing to produce an actionable checklist.
+    """
+
+    def __init__(self, *, checklist_model_config: LLMModelConfig, enable_llm_list_parsing: bool = False):
+        """
+        Initialize the CVEChecklistNode with optional caching and a vulnerability endpoint retriever.
+
+        Parameters
+        ----------
+        model_name : str, optional
+            The name of the language model to be used for generating text, by default "gpt-3.5-turbo".
+        cache_dir : str, optional
+            The directory where the node's cache should be stored. If None, caching is not used.
+        vuln_endpoint_retriever : object, optional
+            An instance of a vulnerability endpoint retriever. If None, defaults to `NISTCVERetriever`.
+        """
+        super().__init__()
+
+        chat_service = LLMService.create(checklist_model_config.service.type,
+                                         **checklist_model_config.service.model_dump(exclude={"type"}, by_alias=True))
+
+        # Add a node to create a prompt for CVE checklist generation based on the CVE details obtained from the lookup
+        # node
+        self.add_node("checklist_prompt",
+                      inputs=[("*", "*")],
+                      node=PromptTemplateNode(template=cve_prompt1, template_format="jinja"))
+
+        # Instantiate a chat service and configure a client for generating responses to the checklist prompt
+        llm_client_1 = chat_service.get_client(
+                        **checklist_model_config.model_dump(exclude={"service", "type"}, by_alias=True)
+                       )
+        gen_node_1 = LLMGenerateNode(llm_client=llm_client_1)
+        self.add_node("chat1", inputs=["/checklist_prompt"], node=gen_node_1)
+
+        if enable_llm_list_parsing:
+            # Add a node to parse the generated response into a format suitable for a secondary checklist prompt
+            self.add_node("parse_checklist_prompt",
+                          inputs=["/chat1"],
+                          node=PromptTemplateNode(template=cve_prompt2, template_format="jinja"))
+
+            # Configure a second client for generating a follow-up response based on the parsed checklist prompt
+            llm_client_2 = chat_service.get_client(
+                            **checklist_model_config.model_dump(exclude={"service", "type"}, by_alias=True)
+                           )
+            gen_node_2 = LLMGenerateNode(llm_client=llm_client_2)
+            self.add_node("chat2", inputs=[("/parse_checklist_prompt", "prompt")], node=gen_node_2)
+
+        checklist_prompts = ["/chat2"] if enable_llm_list_parsing else ["/chat1"]
+        # Add an output parser node to process the final generated checklist into a structured list
+        self.add_node("output_parser", inputs=checklist_prompts, node=LLMLambdaNode(_parse_list), is_output=True)

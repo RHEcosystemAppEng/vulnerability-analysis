@@ -1,0 +1,57 @@
+map $http_authorization $nemo_http_authorization {
+   'Bearer AGENT_MORPHEUS' 'Bearer ${NGC_API_KEY}';
+   'Bearer "AGENT_MORPHEUS"' 'Bearer ${NGC_API_KEY}';
+   'Bearer CYBER_DEV_DAY' 'Bearer ${NGC_API_KEY}';
+   'Bearer "CYBER_DEV_DAY"' 'Bearer ${NGC_API_KEY}';
+   default $http_authorization;
+}
+
+map $http_organization_id $nemo_http_organization_id {
+   'AGENT_MORPHEUS' '${NGC_ORG_ID}';
+   '"AGENT_MORPHEUS"' '${NGC_ORG_ID}';
+   'CYBER_DEV_DAY' '${NGC_ORG_ID}';
+   '"CYBER_DEV_DAY"' '${NGC_ORG_ID}';
+   default $http_organization_id;
+}
+
+map $http_authorization $nim_http_authorization {
+   'Bearer AGENT_MORPHEUS' 'Bearer ${NVIDIA_API_KEY}';
+   'Bearer "AGENT_MORPHEUS"' 'Bearer ${NVIDIA_API_KEY}';
+   'Bearer CYBER_DEV_DAY' '${NVIDIA_API_KEY}';
+   'Bearer "CYBER_DEV_DAY"' '${NVIDIA_API_KEY}';
+   default $http_authorization;
+}
+
+map $http_authorization $nvai_http_authorization {
+   'Bearer AGENT_MORPHEUS' 'Bearer ${NVIDIA_API_KEY}';
+   'Bearer nvapi-AGENT_MORPHEUS' 'Bearer ${NVIDIA_API_KEY}';
+   'Bearer "nvapi-AGENT_MORPHEUS"' 'Bearer ${NVIDIA_API_KEY}';
+   'Bearer CYBER_DEV_DAY' 'Bearer ${NVIDIA_API_KEY}';
+   'Bearer nvapi-CYBER_DEV_DAY' 'Bearer ${NVIDIA_API_KEY}';
+   'Bearer "nvapi-CYBER_DEV_DAY"' 'Bearer ${NVIDIA_API_KEY}';
+   default $http_authorization;
+}
+
+map $http_authorization $openai_http_authorization {
+   'Bearer AGENT_MORPHEUS' 'Bearer ${OPENAI_API_KEY}';
+   'Bearer "AGENT_MORPHEUS"' 'Bearer ${OPENAI_API_KEY}';
+   'Bearer CYBER_DEV_DAY' 'Bearer ${OPENAI_API_KEY}';
+   'Bearer "CYBER_DEV_DAY"' 'Bearer ${OPENAI_API_KEY}';
+   default $http_authorization;
+}
+
+map $http_authorization $ghsa_http_authorization {
+   'Bearer AGENT_MORPHEUS' 'Bearer ${GHSA_API_KEY}';
+   'Bearer "AGENT_MORPHEUS"' 'Bearer ${GHSA_API_KEY}';
+   'Bearer CYBER_DEV_DAY' 'Bearer ${GHSA_API_KEY}';
+   'Bearer "CYBER_DEV_DAY"' 'Bearer ${GHSA_API_KEY}';
+   default $http_authorization;
+}
+
+map $http_authorization $nvd_http_authorization {
+   'Bearer AGENT_MORPHEUS' 'Bearer ${NVD_API_KEY}';
+   'Bearer "AGENT_MORPHEUS"' 'Bearer ${NVD_API_KEY}';
+   'Bearer CYBER_DEV_DAY' 'Bearer ${NVD_API_KEY}';
+   'Bearer "CYBER_DEV_DAY"' 'Bearer ${NVD_API_KEY}';
+   default $http_authorization;
+}
