@@ -1,0 +1,23 @@
+set $openai_upstream https://api.openai.com;
+
+location /openai {
+
+   location ~* ^\/openai\/v1\/((engines\/.+\/)?(?:chat\/completions|completions|edits|moderations|answers|embeddings))$ {
+      rewrite ^\/openai(\/.*)$ $1 break;
+      proxy_pass $openai_upstream;
+      proxy_set_header Connection '';
+      proxy_set_header Authorization $openai_http_authorization;
+      proxy_cache llm_cache;
+      proxy_cache_methods POST;
+      proxy_cache_key "$request_method|$request_uri|$request_body";
+      add_header X-Cache-Status $upstream_cache_status;
+      client_body_buffer_size 4m;
+   }
+
+   location /openai/v1 {
+      rewrite ^\/openai(\/.*)$ $1 break;
+      proxy_pass $openai_upstream;
+      access_log /dev/stdout no_cache_log;
+      access_log /var/log/nginx/access.log no_cache_log;
+   }
+}
