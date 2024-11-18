@@ -1,0 +1,24 @@
+set $nemo_upstream https://api.llm.ngc.nvidia.com;
+
+location /nemo {
+
+   location ~* ^\/nemo\/v1\/models(\/.+\/completions)?$ {
+      rewrite ^\/nemo(\/.*)$ $1 break;
+      proxy_pass $nemo_upstream;
+      proxy_set_header Connection '';
+      proxy_set_header Authorization $nemo_http_authorization;
+      proxy_set_header Organization-ID $nemo_http_organization_id;
+      proxy_cache llm_cache;
+      proxy_cache_methods GET POST;
+      proxy_cache_key "$request_method|$request_uri|$request_body";
+      add_header X-Cache-Status $upstream_cache_status;
+      client_body_buffer_size 4m;
+   }
+
+   location /nemo/v1 {
+      rewrite ^\/nemo(\/.*)$ $1 break;
+      proxy_pass $nemo_upstream;
+      access_log /dev/stdout no_cache_log;
+      access_log /var/log/nginx/access.log no_cache_log;
+   }
+}
