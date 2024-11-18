@@ -1,0 +1,47 @@
+
+set $nvai_upstream ${NGINX_UPSTREAM_NVAI};
+
+location /nvai {
+
+   location ~* ^\/nvai\/v2\/nvcf\/((pexec\/functions\/.+)|(functions))$ {
+      rewrite ^\/nvai(\/.*)$ $1 break;
+      proxy_pass $nvai_upstream;
+      proxy_set_header Connection '';
+      proxy_set_header Authorization $nvai_http_authorization;
+      proxy_cache llm_cache;
+      proxy_cache_methods GET POST;
+      proxy_cache_key "$request_method|$request_uri|$request_body";
+
+      # Only cache 200/202, not 404.
+      proxy_cache_valid 200 14d;
+
+      add_header X-Cache-Status $upstream_cache_status always;
+      client_body_buffer_size 4m;
+
+      access_log /dev/stdout nvai_cache_log;
+      access_log /var/log/nginx/access.log nvai_cache_log;
+   }
+
+   location ~* ^\/nvai\/v2\/nvcf\/(pexec\/status\/.+)$ {
+      rewrite ^\/nvai(\/.*)$ $1 break;
+      proxy_pass $nvai_upstream;
+      proxy_set_header Connection '';
+      proxy_set_header Authorization $nvai_http_authorization;
+      proxy_cache llm_cache;
+      proxy_cache_methods GET;
+      proxy_cache_key "$request_method|$request_uri";
+
+      # Only cache 200. Not 202 as it will cause a never ending loop
+      proxy_cache_valid 200 202 14d;
+
+      add_header X-Cache-Status $upstream_cache_status always;
+      client_body_buffer_size 4m;
+   }
+
+   location /nvai/v2 {
+      rewrite ^\/nvai(\/.*)$ $1 break;
+      proxy_pass $nvai_upstream;
+      access_log /dev/stdout no_cache_log;
+      access_log /var/log/nginx/access.log no_cache_log;
+   }
+}
