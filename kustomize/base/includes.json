@@ -1,0 +1,70 @@
+{
+  "Go": [
+    "**/*.go"
+  ],
+  "Python": [
+    "**/*.py",
+    "pyproject.toml",
+    "setup.py",
+    "setup.cfg"
+  ],
+  "Java": [
+    "**/*.java",
+    "settings.gradle",
+    "src/main/**/*"
+  ],
+  "JavaScript": [
+    "**/*.js",
+    "**/*.jsx",
+    "webpack.config.js",
+    "rollup.config.js",
+    "babel.config.js",
+    ".babelrc",
+    ".eslintrc.js",
+    ".eslintrc.json",
+    "tsconfig.json",
+    "*.config.js",
+    "*.config.json",
+    "public/**/*",
+    "src/**/*"
+  ],
+  "TypeScript": [
+    "**/*.ts",
+    "**/*.tsx",
+    "tsconfig.json",
+    "tsconfig.*.json",
+    "webpack.config.js",
+    "webpack.config.ts",
+    "rollup.config.js",
+    "rollup.config.ts",
+    "babel.config.js",
+    ".babelrc",
+    ".eslintrc.js",
+    ".eslintrc.json",
+    "*.config.js",
+    "*.config.ts",
+    "*.json",
+    "src/**/*",
+    "public/**/*",
+    "assets/**/*"
+  ],
+  "Dockerfile": [
+    "Dockerfile*",
+    "docker-compose.yml",
+    "*.dockerfile",
+    "*.dockerignore",
+    "docker-compose.*.yml",
+    "*.sh",
+    "scripts/**/*",
+    "*.env",
+    "*.yaml",
+    "*.yml",
+    "*.json",
+    "config/**/*",
+    "conf.d/**/*"
+  ],
+  "Docs": [
+    "**/*.md",
+    "docs/**/*.rst"
+  ]
+}
