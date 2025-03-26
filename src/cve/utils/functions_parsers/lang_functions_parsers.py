@@ -42,7 +42,7 @@ class LanguageFunctionsParser(ABC):
         pass
 
     @abstractmethod
-    def get_comment_line_notation(self, line: str) -> str:
+    def get_comment_line_notation(self) -> str:
         pass
 
     @abstractmethod
