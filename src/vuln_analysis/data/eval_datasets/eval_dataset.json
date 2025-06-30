@@ -1,0 +1,7 @@
+[
+    {
+        "id": 1,
+        "question": "{\"image\":{\"name\":\"nvcr.io\/nvidia\/morpheus\/morpheus\",\"tag\":\"23.11-runtime\",\"source_info\":[{\"type\":\"code\",\"git_repo\":\"https:\/\/github.com\/nv-morpheus\/Morpheus.git\",\"ref\":\"v23.11.01\",\"include\":[\"**\/*.cpp\",\"**\/*.cu\",\"**\/*.cuh\",\"**\/*.h\",\"**\/*.hpp\",\"**\/*.ipynb\",\"**\/*.py\",\"**\/*Dockerfile\"],\"exclude\":[\"tests\/**\/*\"]},{\"type\":\"doc\",\"git_repo\":\"https:\/\/github.com\/nv-morpheus\/Morpheus.git\",\"ref\":\"v23.11.01\",\"include\":[\"**\/*.md\",\"docs\/**\/*.rst\"]}],\"sbom_info\":{\"_type\":\"file\",\"file_path\":\"data\/sboms\/nvcr.io\/nvidia\/morpheus\/morpheus:v23.11.01-runtime.sbom\"}},\"scan\":{\"vulns\":[{\"vuln_id\":\"GHSA-3f63-hfp8-52jq\"},{\"vuln_id\":\"CVE-2023-50782\"}]}}",
+        "answer": "N/A"
+    }
+]
