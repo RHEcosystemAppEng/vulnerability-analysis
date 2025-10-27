@@ -48,6 +48,10 @@
     "public/**/*",
     "assets/**/*"
   ],
+  "C":[
+    "**/*.c",        
+    "**/*.h"
+  ],
   "Dockerfile": [
     "Dockerfile*",
     "docker-compose.yml",
