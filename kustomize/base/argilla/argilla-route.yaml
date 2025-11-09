@@ -1,0 +1,15 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: argilla
+  annotations:
+    haproxy.router.openshift.io/timeout: 5m
+spec:
+  tls:
+    insecureEdgeTerminationPolicy: Redirect
+    termination: edge
+  port:
+    targetPort: 6900
+  to:
+    kind: Service
+    name: argilla
