@@ -15,11 +15,11 @@ spec:
         app: morpheus-feedback-api
     spec:
       imagePullSecrets:
-        - name: exploit-iq-pull-secret #morpheus-pull-secret (old)
+        - name: argilla-user-feedback-ips
       serviceAccountName: argilla
       containers:
         - name: flask-service
-          image: quay.io/rh-ee-rhartuv/morpheus-feedback-api:latest
+          image: quay.io/exploit-iq/user-feedback-api:latest
           imagePullPolicy: Always
           ports:
             - containerPort: 5001
