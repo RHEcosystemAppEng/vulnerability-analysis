@@ -1,0 +1,9 @@
+apiVersion: v1
+data:
+  ARGILLA_HOME_PATH: "/var/lib/argilla"
+  ARGILLA_ELASTICSEARCH: "http://localhost:9200"
+  ARGILLA_DATABASE_URL: "postgresql+asyncpg://postgres:postgres@localhost:5432/argilla"
+  ARGILLA_REDIS_URL: "redis://localhost:6379/0"
+kind: ConfigMap
+metadata:
+  name: argilla-config
