@@ -15,7 +15,8 @@
   ],
   "JavaScript": [
     "**/*.js",
-    "**/*.jsx",
+    "**/*.mjs",
+    "**/*.cjs",
     "webpack.config.js",
     "rollup.config.js",
     "babel.config.js",
