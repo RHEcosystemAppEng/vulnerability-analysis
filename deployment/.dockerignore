@@ -1,0 +1,59 @@
+# Git
+.git/
+.gitignore
+.github/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+tests/
+*.log
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Deployment (except Dockerfile)
+deployment/base/
+deployment/overlays/
+
+# Development
+Makefile
+.env
+.env.local
+
+# Large test data
+tests/test_data/
+src/evaluation/test_data/
+
+# Temporary files
+*.tmp
+*.bak

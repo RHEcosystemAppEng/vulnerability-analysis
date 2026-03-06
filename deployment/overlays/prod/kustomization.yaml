@@ -1,0 +1,48 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: cve-evaluation-prod
+
+bases:
+  - ../../base
+
+namePrefix: prod-
+
+# Production image tag (use specific version, not latest)
+images:
+  - name: cve-evaluation
+    newName: quay.io/your-org/cve-evaluation
+    newTag: v1.0.0
+
+# Production replicas (can scale up)
+replicas:
+  - name: cve-evaluation
+    count: 2
+
+# Production ConfigMap
+configMapGenerator:
+- name: evaluation-config
+  behavior: replace
+  literals:
+  - EXPLOIT_IQ_API_BASE=https://exploit-iq-prod.apps.prod-cluster.com
+  - JUDGE_MODEL=mistralai/mistral-small-3.1-24b-instruct-2503
+  - JUDGE_BASE_URL=https://integrate.api.nvidia.com/v1
+  - LOG_LEVEL=INFO
+  - EVALUATION_TIMEOUT=300
+
+# Production Secret
+# IMPORTANT: Use External Secrets Operator or Sealed Secrets in production
+# Do NOT use envs or literals for production secrets!
+# This is just a placeholder - configure external secrets in your cluster
+secretGenerator:
+- name: evaluation-secret
+  behavior: replace
+  envs:
+  - secret.env
+
+# Patches for prod-specific changes
+patches:
+  - path: patches.yaml
+    target:
+      kind: Deployment
+      name: cve-evaluation

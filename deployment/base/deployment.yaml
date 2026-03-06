@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cve-evaluation
+  labels:
+    app: cve-evaluation
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cve-evaluation
+  template:
+    metadata:
+      labels:
+        app: cve-evaluation
+      annotations:
+        # Force restart on config changes
+        checksum/config: "placeholder"
+    spec:
+      serviceAccountName: default
+
+      containers:
+      - name: evaluation
+        image: cve-evaluation:latest
+        imagePullPolicy: Always
+
+        # Command override (optional)
+        # args:
+        #   - "--mode"
+        #   - "api"
+        #   - "--stages"
+        #   - "all"
+        #   - "--submit"
+
+        # Environment from ConfigMap and Secret
+        envFrom:
+        - configMapRef:
+            name: evaluation-config
+        - secretRef:
+            name: evaluation-secret
+
+        # Additional environment variables
+        env:
+        - name: PYTHONUNBUFFERED
+          value: "1"
+        - name: LOG_LEVEL
+          value: "INFO"
+
+        # Resource limits
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "2Gi"
+            cpu: "2000m"
+
+        # Liveness probe (optional - checks if container is alive)
+        livenessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - "import sys; sys.exit(0)"
+          initialDelaySeconds: 30
+          periodSeconds: 30
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+        # Readiness probe (optional - checks if ready to serve)
+        readinessProbe:
+          exec:
+            command:
+            - python
+            - -c
+            - "import sys; sys.exit(0)"
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+
+      # Restart policy
+      restartPolicy: Always
+
+      # Security context
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000

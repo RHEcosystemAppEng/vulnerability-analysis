@@ -1,0 +1,47 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: cve-evaluation-dev
+
+bases:
+  - ../../base
+
+namePrefix: dev-
+
+# Override image tag for dev
+images:
+  - name: cve-evaluation
+    newName: quay.io/your-org/cve-evaluation
+    newTag: dev
+
+# Override replicas for dev
+replicas:
+  - name: cve-evaluation
+    count: 1
+
+# Override ConfigMap for dev environment
+configMapGenerator:
+- name: evaluation-config
+  behavior: replace
+  literals:
+  - EXPLOIT_IQ_API_BASE=https://exploit-iq-dev.apps.dev-cluster.com
+  - JUDGE_MODEL=mistralai/mistral-small-3.1-24b-instruct-2503
+  - JUDGE_BASE_URL=https://integrate.api.nvidia.com/v1
+  - LOG_LEVEL=DEBUG
+  - EVALUATION_TIMEOUT=600
+
+# Override Secret for dev environment
+# IMPORTANT: Create secret.env file locally (add to .gitignore)
+# Format: KEY=VALUE (one per line)
+secretGenerator:
+- name: evaluation-secret
+  behavior: replace
+  envs:
+  - secret.env
+
+# Patches for dev-specific changes
+patches:
+  - path: patches.yaml
+    target:
+      kind: Deployment
+      name: cve-evaluation

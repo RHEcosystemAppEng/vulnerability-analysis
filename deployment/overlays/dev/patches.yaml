@@ -1,0 +1,28 @@
+# Dev-specific patches
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cve-evaluation
+spec:
+  template:
+    spec:
+      containers:
+      - name: evaluation
+        # Override command for dev (run with limited jobs, no submit)
+        args:
+          - "--mode"
+          - "api"
+          - "--limit"
+          - "5"
+          - "--stages"
+          - "all"
+          - "--no-submit"
+
+        # Lower resource limits for dev
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"

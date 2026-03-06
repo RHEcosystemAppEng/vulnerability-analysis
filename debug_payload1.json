@@ -1,0 +1,26 @@
+[
+  {
+    "job_id": "3bc8e908-e502-4056-a0ee-92db3ed13bce",
+    "trace_id": "33c10ee8494c4dda9e923dc3f121b443",
+    "execution_start_timestamp": "2026-02-16T09:09:30.132437",
+    "cve": "CVE-2025-1094",
+    "component": "https://github.com/postgres/postgres",
+    "component_version": "b3b2bf3b9cc1f31170d3b4e21cb6ac0cf24bf90a",
+    "llm_node": "CHECKLIST_GENERATION",
+    "metric_name": "CHECKLIST_PROMPT_ALIGNMENT",
+    "metric_score": "0.6",
+    "metric_reasoning": "The score is 0.60 because the LLM did not strictly adhere to the prompt instructions by not including specific technical details in one of the questions and by not verifying if the vulnerable function is called in the codebase in another question. However, it did follow the instructions in the majority of the questions, hence the score is not lower."
+  },
+  {
+    "job_id": "3bc8e908-e502-4056-a0ee-92db3ed13bce",
+    "trace_id": "33c10ee8494c4dda9e923dc3f121b443",
+    "execution_start_timestamp": "2026-02-16T09:09:30.132437",
+    "cve": "CVE-2025-1094",
+    "component": "https://github.com/postgres/postgres",
+    "component_version": "b3b2bf3b9cc1f31170d3b4e21cb6ac0cf24bf90a",
+    "llm_node": "CHECKLIST_GENERATION",
+    "metric_name": "CHECKLIST_QUALITY",
+    "metric_score": "0.8",
+    "metric_reasoning": "The response meets the RELEVANCE criteria as all questions directly relate to the CVE description, focusing on the vulnerable functions and their usage. It also meets the COMPLETENESS criteria by covering the vulnerability chain: presence, usage, reachability, and exploitability. The response meets the ACTIONABILITY criteria as each question can be answered using code/docs analysis tools and is specific enough to get definitive answers. However, it fails the PRIORITIZATION criteria because the first question is about the presence of vulnerable functions rather than their usage, which is the most critical check."
+  }
+]
