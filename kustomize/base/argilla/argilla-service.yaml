@@ -6,7 +6,7 @@ metadata:
     app: argilla
 spec:
   selector:
-    app: morpheus-feedback-api
+    app: exploit-intelligence-feedback-api
   ports:
     - protocol: TCP
       port: 6900
